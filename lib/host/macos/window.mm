@@ -84,7 +84,13 @@ namespace cycfi::elements
             backing : NSBackingStoreBuffered
             defer : NO
          ];
-      _window = (__bridge host_window*) window_;
+
+      // Retain the NSWindow for the lifetime of the C++ window object and
+      // keep it alive after close(): releasedWhenClosed defaults to YES,
+      // which would deallocate the window (and leave _window dangling)
+      // since _window is a non-owning __bridge pointer.
+      [window_ setReleasedWhenClosed : NO];
+      _window = (__bridge_retained host_window*) window_;
 
       window_.appearance = [NSAppearance appearanceNamed : NSAppearanceNameVibrantDark];
       [window_ setTitle : [NSString stringWithUTF8String : name.c_str()]];
@@ -118,6 +124,8 @@ namespace cycfi::elements
 
    window::~window()
    {
+      // Release the reference retained in the constructor.
+      CFBridgingRelease(_window);
    }
 
    point window::size() const
@@ -190,7 +198,13 @@ namespace cycfi::elements
    void window::minimize()
    {
       id window_ = (__bridge id) _window;
-      [window_ miniaturize:nil];
+
+      // miniaturize: is a no-op unless the window has the miniaturizable
+      // style mask (frameless windows created with only `resizable` don't).
+      // Add it on demand so minimize() works for borderless windows too.
+      if (!([window_ styleMask] & NSWindowStyleMaskMiniaturizable))
+         [window_ setStyleMask : [window_ styleMask] | NSWindowStyleMaskMiniaturizable];
+      [window_ miniaturize : nil];
    }
 
    void window::maximize()
