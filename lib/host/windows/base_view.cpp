@@ -390,6 +390,35 @@ namespace cycfi::elements
             case WM_ERASEBKGND:
                return true;
 
+            case WM_NCHITTEST:
+               {
+                  // For frameless resizable windows, the system sends
+                  // WM_NCHITTEST to this child view (it covers the whole
+                  // client area). Pass edge hit-testing through to the
+                  // top-level window via HTTRANSPARENT so the OS performs
+                  // the resize; everything else stays HTCLIENT and is
+                  // handled by the view (buttons, title-bar dragging).
+                  auto parent = GetParent(hwnd);
+                  if (parent && GetPropW(parent, L"ElementsFramelessResizable"))
+                  {
+                     POINT pt{int(short(LOWORD(lparam))), int(short(HIWORD(lparam)))};
+                     RECT r;
+                     GetWindowRect(hwnd, &r);
+
+                     auto scale = get_scale_for_window(hwnd);
+                     auto m = LONG(6 * scale);
+
+                     bool left = pt.x < r.left + m;
+                     bool right = pt.x >= r.right - m;
+                     bool top = pt.y < r.top + m;
+                     bool bottom = pt.y >= r.bottom - m;
+
+                     if (left || right || top || bottom)
+                        return HTTRANSPARENT;
+                  }
+                  return DefWindowProcW(hwnd, message, wparam, lparam);
+               }
+
             case WM_LBUTTONDOWN:
             case WM_MBUTTONDOWN:
             case WM_RBUTTONDOWN:

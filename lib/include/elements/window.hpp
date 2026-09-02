@@ -57,6 +57,9 @@ namespace cycfi::elements
       void                 limits(view_limits limits_);
       point                position() const;
       void                 position(point const& p);
+      void                 close();
+      void                 minimize();
+      void                 maximize();
       host_window_handle   host() const { return _window; }
 
       /////////////////////////////////////////////////////////////////////////

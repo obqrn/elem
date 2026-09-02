@@ -180,5 +180,23 @@ namespace cycfi::elements
 
       [window_ setFrame : frame display : YES animate : false];
    }
+
+   void window::close()
+   {
+      id window_ = (__bridge id) _window;
+      [window_ close];
+   }
+
+   void window::minimize()
+   {
+      id window_ = (__bridge id) _window;
+      [window_ miniaturize:nil];
+   }
+
+   void window::maximize()
+   {
+      id window_ = (__bridge id) _window;
+      [window_ zoom:nil];
+   }
 }
 

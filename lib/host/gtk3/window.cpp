@@ -162,5 +162,53 @@ namespace cycfi::elements
       else
          on_activate.push_back(set_position);
    }
+
+   void window::close()
+   {
+      auto do_close =
+         [this]()
+         {
+            gtk_widget_hide(GTK_WIDGET(_window->host));
+            if (on_close)
+               on_close();
+         };
+
+      if (app_is_activated())
+         do_close();
+      else
+         on_activate.push_back(do_close);
+   }
+
+   void window::minimize()
+   {
+      auto do_minimize =
+         [this]()
+         {
+            gtk_window_iconify(GTK_WINDOW(_window->host));
+         };
+
+      if (app_is_activated())
+         do_minimize();
+      else
+         on_activate.push_back(do_minimize);
+   }
+
+   void window::maximize()
+   {
+      auto do_maximize =
+         [this]()
+         {
+            auto win = GTK_WINDOW(_window->host);
+            if (gtk_window_is_maximized(win))
+               gtk_window_unmaximize(win);
+            else
+               gtk_window_maximize(win);
+         };
+
+      if (app_is_activated())
+         do_maximize();
+      else
+         on_activate.push_back(do_maximize);
+   }
 }
 

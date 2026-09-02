@@ -26,6 +26,12 @@ namespace cycfi::elements
       {
          window*     wptr = nullptr;
          view_limits limits = {};
+
+         // State for the custom borderless-resize loop (see WM_NCLBUTTONDOWN
+         // in handle_event).
+         int         sizing_edge = 0;
+         RECT        sizing_start = {};
+         POINT       sizing_grab = {};
       };
 
       window_info* get_window_info(HWND hwnd)
@@ -103,21 +109,80 @@ namespace cycfi::elements
          return extra;
       }
 
-      void constrain_size(HWND hwnd, RECT& r, view_limits limits)
+      void constrain_size(HWND hwnd, RECT& r, view_limits limits, int edge = WMSZ_BOTTOMRIGHT)
       {
+         // WM_SIZING's wparam carries WMSZ_* codes (1..8); hit-testing and
+         // WM_NCLBUTTONDOWN carry HT* codes (10..17). Normalize so this
+         // function works for both callers.
+         switch (edge)
+         {
+            case HTLEFT:        edge = WMSZ_LEFT;        break;
+            case HTRIGHT:       edge = WMSZ_RIGHT;       break;
+            case HTTOP:         edge = WMSZ_TOP;         break;
+            case HTTOPLEFT:     edge = WMSZ_TOPLEFT;     break;
+            case HTTOPRIGHT:    edge = WMSZ_TOPRIGHT;    break;
+            case HTBOTTOM:      edge = WMSZ_BOTTOM;      break;
+            case HTBOTTOMLEFT:  edge = WMSZ_BOTTOMLEFT;  break;
+            case HTBOTTOMRIGHT: edge = WMSZ_BOTTOMRIGHT; break;
+            default: break;
+         }
+
          auto scale = get_scale_for_window(hwnd);
          auto extra = window_frame_size(hwnd);
-         auto w = ((r.right - r.left) - extra.x) / scale;
-         auto h = ((r.bottom - r.top) - extra.y) / scale;
 
-         if (w > limits.max.x)
-            r.right = r.left + extra.x + (limits.max.x * scale);
-         if (w < limits.min.x)
-            r.right = r.left + extra.x + (limits.min.x * scale);
-         if (h > limits.max.y)
-            r.bottom = r.top + extra.y + (limits.max.y * scale);
-         if (h < limits.min.y)
-            r.bottom = r.top + extra.y + (limits.min.y * scale);
+         double minx = limits.min.x * scale + extra.x;
+         double maxx = limits.max.x * scale + extra.x;
+         double miny = limits.min.y * scale + extra.y;
+         double maxy = limits.max.y * scale + extra.y;
+
+         // Which edges are being dragged? WM_SIZING's wparam is the hit-test
+         // code of the dragged edge/corner. We must clamp the MOVING edge
+         // against the fixed one, otherwise shrinking a left/top edge below
+         // the minimum would drag the opposite edge along and make the
+         // window appear to move instead of stopping at the minimum size.
+         bool left_moving   = edge == WMSZ_LEFT   || edge == WMSZ_TOPLEFT   || edge == WMSZ_BOTTOMLEFT;
+         bool right_moving  = edge == WMSZ_RIGHT  || edge == WMSZ_TOPRIGHT  || edge == WMSZ_BOTTOMRIGHT;
+         bool top_moving    = edge == WMSZ_TOP    || edge == WMSZ_TOPLEFT   || edge == WMSZ_TOPRIGHT;
+         bool bottom_moving = edge == WMSZ_BOTTOM || edge == WMSZ_BOTTOMLEFT || edge == WMSZ_BOTTOMRIGHT;
+
+         // Fall back to the right/bottom edges (e.g. programmatic resizes).
+         if (!left_moving && !right_moving)
+            right_moving = true;
+         if (!top_moving && !bottom_moving)
+            bottom_moving = true;
+
+         double w = double(r.right - r.left);
+         double h = double(r.bottom - r.top);
+
+         if (left_moving && !right_moving)
+         {
+            if (w < minx)
+               r.left = LONG(r.right - minx);
+            else if (w > maxx && maxx < 1E9)
+               r.left = LONG(r.right - maxx);
+         }
+         else if (right_moving && !left_moving)
+         {
+            if (w < minx)
+               r.right = LONG(r.left + minx);
+            else if (w > maxx && maxx < 1E9)
+               r.right = LONG(r.left + maxx);
+         }
+
+         if (top_moving && !bottom_moving)
+         {
+            if (h < miny)
+               r.top = LONG(r.bottom - miny);
+            else if (h > maxy && maxy < 1E9)
+               r.top = LONG(r.bottom - maxy);
+         }
+         else if (bottom_moving && !top_moving)
+         {
+            if (h < miny)
+               r.bottom = LONG(r.top + miny);
+            else if (h > maxy && maxy < 1E9)
+               r.bottom = LONG(r.top + maxy);
+         }
       }
 
       LRESULT CALLBACK handle_event(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
@@ -125,6 +190,82 @@ namespace cycfi::elements
          auto* info = get_window_info(hwnd);
          switch (message)
          {
+            case WM_NCLBUTTONDOWN:
+               {
+                  // Borderless windows cannot rely on DefWindowProc's modal
+                  // size loop: without WS_THICKFRAME the loop does not send
+                  // WM_SIZING, so shrinking a left/top edge past the minimum
+                  // would invert the rect and turn the resize into a window
+                  // move. Instead we run our own loop with explicit
+                  // minimum/maximum clamping.
+                  auto edge = int(wparam);
+                  bool is_edge = edge >= HTLEFT && edge <= HTBOTTOMRIGHT;
+                  if (info && GetPropW(hwnd, L"ElementsFramelessResizable") && is_edge)
+                  {
+                     POINT pt{int(short(LOWORD(lparam))), int(short(HIWORD(lparam)))};
+                     GetWindowRect(hwnd, &info->sizing_start);
+                     info->sizing_grab = pt;
+                     info->sizing_edge = edge;
+                     SetCapture(hwnd);
+                     return 0;
+                  }
+                  // Not a frameless edge drag: let the system handle it
+                  // (e.g. HTCAPTION moves a standard window's title bar).
+                  return DefWindowProcW(hwnd, message, wparam, lparam);
+               }
+
+            case WM_MOUSEMOVE:
+               if (info && info->sizing_edge)
+               {
+                  POINT pt;
+                  GetCursorPos(&pt);
+
+                  auto edge = info->sizing_edge;
+                  auto const& start = info->sizing_start;
+                  auto const& grab = info->sizing_grab;
+                  RECT nr = start;
+
+                  bool left_moving   = edge == HTLEFT   || edge == HTTOPLEFT   || edge == HTBOTTOMLEFT;
+                  bool right_moving  = edge == HTRIGHT  || edge == HTTOPRIGHT  || edge == HTBOTTOMRIGHT;
+                  bool top_moving    = edge == HTTOP    || edge == HTTOPLEFT   || edge == HTTOPRIGHT;
+                  bool bottom_moving = edge == HTBOTTOM || edge == HTBOTTOMLEFT || edge == HTBOTTOMRIGHT;
+
+                  if (left_moving)
+                     nr.left = start.left + (pt.x - grab.x);
+                  if (right_moving)
+                     nr.right = start.right + (pt.x - grab.x);
+                  if (top_moving)
+                     nr.top = start.top + (pt.y - grab.y);
+                  if (bottom_moving)
+                     nr.bottom = start.bottom + (pt.y - grab.y);
+
+                  constrain_size(hwnd, nr, info->limits, edge);
+
+                  SetWindowPos(
+                     hwnd, nullptr,
+                     nr.left, nr.top,
+                     nr.right - nr.left, nr.bottom - nr.top,
+                     SWP_NOZORDER | SWP_NOACTIVATE
+                  );
+                  return 0;
+               }
+               return DefWindowProcW(hwnd, message, wparam, lparam);
+
+            case WM_NCLBUTTONUP:
+            case WM_LBUTTONUP:
+               if (info && info->sizing_edge)
+               {
+                  info->sizing_edge = 0;
+                  ReleaseCapture();
+                  return 0;
+               }
+               return DefWindowProcW(hwnd, message, wparam, lparam);
+
+            case WM_CAPTURECHANGED:
+               if (info)
+                  info->sizing_edge = 0;
+               return DefWindowProcW(hwnd, message, wparam, lparam);
+
             case WM_CLOSE:
                ShowWindow(hwnd, SW_HIDE);
                return on_close(info->wptr);
@@ -133,11 +274,39 @@ namespace cycfi::elements
             case WM_SIZE:
                return on_size(hwnd);
 
+            case WM_NCHITTEST:
+               if (GetPropW(hwnd, L"ElementsFramelessResizable"))
+               {
+                  POINT pt{int(short(LOWORD(lparam))), int(short(HIWORD(lparam)))};
+                  RECT r;
+                  GetWindowRect(hwnd, &r);
+
+                  auto scale = get_scale_for_window(hwnd);
+                  auto m = LONG(6 * scale);
+
+                  bool left = pt.x < r.left + m;
+                  bool right = pt.x >= r.right - m;
+                  bool top = pt.y < r.top + m;
+                  bool bottom = pt.y >= r.bottom - m;
+
+                  if (top && left)       return HTTOPLEFT;
+                  if (top && right)      return HTTOPRIGHT;
+                  if (bottom && left)    return HTBOTTOMLEFT;
+                  if (bottom && right)   return HTBOTTOMRIGHT;
+                  if (left)              return HTLEFT;
+                  if (right)             return HTRIGHT;
+                  if (top)               return HTTOP;
+                  if (bottom)            return HTBOTTOM;
+
+                  return HTCLIENT;
+               }
+               return DefWindowProcW(hwnd, message, wparam, lparam);
+
             case WM_SIZING:
                if (info)
                {
                   auto& r = *reinterpret_cast<RECT*>(lparam);
-                  constrain_size(hwnd, r, info->limits);
+                  constrain_size(hwnd, r, info->limits, int(wparam));
                }
                break;
 
@@ -175,10 +344,15 @@ namespace cycfi::elements
       auto scale = GetDpiForSystem() / 96.0f;
       #endif
 
+      // Frameless windows (no `with_title` style, e.g. window::bare)
+      // are created as borderless popup windows. Resize is handled via
+      // WM_NCHITTEST (see handle_event) instead of a system frame.
+      auto win_style = (style_ & with_title)? WS_OVERLAPPEDWINDOW : WS_POPUP;
+
       _window = CreateWindowW(
          L"ElementsWindow",
          wname.c_str(),
-         WS_OVERLAPPEDWINDOW,
+         win_style,
          bounds.left * scale, bounds.top * scale,
          bounds.width() * scale, bounds.height() * scale,
          nullptr, nullptr, nullptr,
@@ -188,12 +362,21 @@ namespace cycfi::elements
       auto* info = new window_info{this};
       SetWindowLongPtrW(_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(info));
 
-      if (!(style_ & closable))
-         disable_close(_window);
-      if (!(style_ & miniaturizable))
-         disable_minimize(_window);
-      if (!(style_ & resizable))
-         disable_resize(_window);
+      // Marker used by the child view (WM_NCHITTEST) to pass edge
+      // hit-testing through to this top-level window, enabling native
+      // borderless resize.
+      if (!(style_ & with_title) && (style_ & resizable))
+         SetPropW(_window, L"ElementsFramelessResizable", (HANDLE)1);
+
+      if (style_ & with_title)
+      {
+         if (!(style_ & closable))
+            disable_close(_window);
+         if (!(style_ & miniaturizable))
+            disable_minimize(_window);
+         if (!(style_ & resizable))
+            disable_resize(_window);
+      }
 
       // Sets the app icon for the window to show on the titlebar.
       // The IDI_ELEMENTS_APP_ICON icon id should be defined in a resource file.
@@ -275,6 +458,22 @@ namespace cycfi::elements
          frame.bottom - frame.top,
          true // repaint
       );
+   }
+
+   void window::close()
+   {
+      ::SendMessage(_window, WM_CLOSE, 0, 0);
+   }
+
+   void window::minimize()
+   {
+      ::ShowWindow(_window, SW_MINIMIZE);
+   }
+
+   void window::maximize()
+   {
+      // Toggle between maximized and restored.
+      ::ShowWindow(_window, IsZoomed(_window)? SW_RESTORE : SW_MAXIMIZE);
    }
 }
 
