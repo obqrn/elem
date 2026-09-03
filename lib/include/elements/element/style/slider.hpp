@@ -8,6 +8,8 @@
 
 #include <elements/element/slider.hpp>
 
+#include <optional>
+
 namespace cycfi::elements
 {
    ////////////////////////////////////////////////////////////////////////////
@@ -20,7 +22,7 @@ namespace cycfi::elements
 
       static unsigned const size = _size;
 
-                              basic_thumb_styler(color c = colors::black)
+                              basic_thumb_styler(std::optional<color> c = std::nullopt)
                                : _color(c)
                               {}
 
@@ -29,7 +31,7 @@ namespace cycfi::elements
 
    private:
 
-      color                   _color;
+      std::optional<color>    _color;
    };
 
    template <unsigned size>
@@ -48,11 +50,11 @@ namespace cycfi::elements
       auto  indicator_color = thm.indicator_color.level(1.5);
       auto  cp = circle{center_point(ctx.bounds), size/2.0f};
 
-      draw_thumb(cnv, cp, _color, indicator_color);
+      draw_thumb(cnv, cp, _color ? *_color : thm.slider_thumb_color, indicator_color);
    }
 
    template <unsigned size>
-   inline basic_thumb_styler<size> basic_thumb(color c = colors::black)
+   inline basic_thumb_styler<size> basic_thumb(std::optional<color> c = std::nullopt)
    {
       return {c};
    }
@@ -69,7 +71,7 @@ namespace cycfi::elements
       static bool const vertical = _vertical;
       static unsigned const min_length = 64;
 
-                              basic_track_styler(color c = colors::black)
+                              basic_track_styler(std::optional<color> c = std::nullopt)
                                : _color(c)
                               {}
 
@@ -78,7 +80,7 @@ namespace cycfi::elements
 
    private:
 
-      color                   _color;
+      std::optional<color>    _color;
    };
 
    template <unsigned size, bool vertical>
@@ -96,12 +98,13 @@ namespace cycfi::elements
    inline void basic_track_styler<size, vertical>
       ::draw(context const& ctx)
    {
-      draw_track(ctx.canvas, ctx.bounds);
+      auto& thm = get_theme();
+      draw_track(ctx.canvas, ctx.bounds, _color ? *_color : thm.slider_track_color);
    }
 
    template <unsigned size, bool vertical = false>
    inline basic_track_styler<size, vertical>
-   basic_track(color c = colors::black)
+   basic_track(std::optional<color> c = std::nullopt)
    {
       return {c};
    }

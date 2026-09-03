@@ -15,6 +15,7 @@
 
 #include <functional>
 #include <utility>
+#include <optional>
 
 namespace cycfi::elements
 {
@@ -301,12 +302,12 @@ namespace cycfi::elements
    class panel : public element
    {
    public:
-                     panel(float opacity_ = get_theme().panel_color.alpha);
+                     panel(std::optional<float> opacity_ = std::nullopt);
       void           draw(context const& ctx) override;
 
    private:
 
-      float          _opacity;
+      std::optional<float> _opacity;
    };
 
    /**
@@ -314,10 +315,12 @@ namespace cycfi::elements
     *    Constructor for creating a panel with a specific opacity.
     *
     * \param opacity_
-    *    The opacity level for the panel. A float value where 0.0 is fully
-    *    transparent and 1.0 is fully opaque.
+    *    Optional opacity level for the panel: a float value where 0.0 is
+    *    fully transparent and 1.0 is fully opaque. Pass `std::nullopt`
+    *    (the default) to use the current theme's `panel_color` alpha at
+    *    draw time, so runtime theme switches affect the panel.
     */
-   inline panel::panel(float opacity_)
+   inline panel::panel(std::optional<float> opacity_)
     : _opacity(opacity_)
    {}
 

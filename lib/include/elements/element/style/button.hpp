@@ -15,6 +15,7 @@
 #include <infra/support.hpp>
 #include <infra/string_view.hpp>
 #include <utility>
+#include <optional>
 
 namespace cycfi::elements
 {
@@ -143,7 +144,7 @@ namespace cycfi::elements
    {
       using base_type = button_styler_with_body_color<typename Base::base_type>;
 
-                              button_styler_with_body_color(Base base, color color_)
+                              button_styler_with_body_color(Base base, std::optional<color> color_)
                                : Base(std::move(base)), _color(color_)
                               {}
 
@@ -152,7 +153,7 @@ namespace cycfi::elements
 
    private:
 
-      color                   _color;
+      std::optional<color>    _color;
    };
 
    /**
@@ -523,7 +524,7 @@ namespace cycfi::elements
       using gen_rounded_corner_bottom_right  = gen_rounded_corner<corner_t::bottom_right>;
 
       gen_size                         size(float size) const;
-      gen_body_color                   body_color(color color_) const;
+      gen_body_color                   body_color(std::optional<color> color_) const;
       gen_active_body_color            active_body_color(color color_) const;
       gen_text_color                   text_color(color color_) const;
       gen_icon                         icon(std::uint32_t code) const;
@@ -568,7 +569,7 @@ namespace cycfi::elements
    inline auto button(
       std::string label
     , float size = 1.0
-    , color body_color = get_theme().default_button_color)
+    , std::optional<color> body_color = std::nullopt)
    {
       return momentary_button<Base>(
          button_styler{std::move(label)}
@@ -585,7 +586,7 @@ namespace cycfi::elements
       std::uint32_t icon_code
     , std::string label
     , float size
-    , color body_color = get_theme().default_button_color)
+    , std::optional<color> body_color = std::nullopt)
    {
       return momentary_button<Base>(
          button_styler{std::move(label)}
@@ -604,7 +605,7 @@ namespace cycfi::elements
       std::string label
     , std::uint32_t icon_code
     , float size
-    , color body_color = get_theme().default_button_color)
+    , std::optional<color> body_color = std::nullopt)
    {
       return momentary_button<Base>(
          button_styler{std::move(label)}
@@ -622,7 +623,7 @@ namespace cycfi::elements
    inline auto toggle_button(
       std::string label
     , float size = 1.0
-    , color body_color = get_theme().default_button_color)
+    , std::optional<color> body_color = std::nullopt)
    {
       return toggle_button<Base>(
          button_styler{std::move(label)}
@@ -639,7 +640,7 @@ namespace cycfi::elements
       std::uint32_t icon_code
     , std::string label
     , float size
-    , color body_color = get_theme().default_button_color)
+    , std::optional<color> body_color = std::nullopt)
    {
       return toggle_button<Base>(
          button_styler{std::move(label)}
@@ -658,7 +659,7 @@ namespace cycfi::elements
       std::string label
     , std::uint32_t icon_code
     , float size
-    , color body_color = get_theme().default_button_color)
+    , std::optional<color> body_color = std::nullopt)
    {
       return toggle_button<Base>(
          button_styler{std::move(label)}
@@ -676,7 +677,7 @@ namespace cycfi::elements
    inline auto latching_button(
       std::string label
     , float size = 1.0
-    , color body_color = get_theme().default_button_color)
+    , std::optional<color> body_color = std::nullopt)
    {
       return latching_button<Base>(
          button_styler{std::move(label)}
@@ -693,7 +694,7 @@ namespace cycfi::elements
       std::uint32_t icon_code
     , std::string label
     , float size
-    , color body_color = get_theme().default_button_color)
+    , std::optional<color> body_color = std::nullopt)
    {
       return latching_button<Base>(
          button_styler{std::move(label)}
@@ -712,7 +713,7 @@ namespace cycfi::elements
       std::string label
     , std::uint32_t icon_code
     , float size
-    , color body_color = get_theme().default_button_color)
+    , std::optional<color> body_color = std::nullopt)
    {
       return latching_button<Base>(
          button_styler{std::move(label)}
@@ -831,7 +832,7 @@ namespace cycfi::elements
    template <concepts::ButtonStyler Base>
    inline color button_styler_with_body_color<Base>::get_body_color() const
    {
-      return _color;
+      return _color ? *_color : Base::get_body_color();
    }
 
    template <concepts::ButtonStyler Base>
@@ -1166,7 +1167,7 @@ namespace cycfi::elements
 
    template <concepts::ButtonStyler Base>
    inline typename button_styler_gen<Base>::gen_body_color
-   button_styler_gen<Base>::body_color(color color_) const
+   button_styler_gen<Base>::body_color(std::optional<color> color_) const
    {
       return {*this, color_};
    }

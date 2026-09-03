@@ -10,6 +10,8 @@
 #include <elements/element/style/button.hpp>
 #include <elements/support/theme.hpp>
 
+#include <optional>
+
 namespace cycfi::elements
 {
    ////////////////////////////////////////////////////////////////////////////
@@ -34,7 +36,7 @@ namespace cycfi::elements
                               icon_button_styler(
                                  uint32_t code
                                , float size
-                               , color body_color = get_theme().default_button_color
+                               , std::optional<color> body_color = std::nullopt
                               )
                                : icon_button_styler_base(size)
                                , _code(code)
@@ -44,7 +46,7 @@ namespace cycfi::elements
       void                    draw(context const& ctx) override;
 
       uint32_t                _code;
-      color                   _body_color;
+      std::optional<color>    _body_color;
    };
 
    ////////////////////////////////////////////////////////////////////////////
@@ -56,7 +58,7 @@ namespace cycfi::elements
                                  uint32_t code1
                                , uint32_t code2
                                , float size
-                               , color body_color = get_theme().default_button_color
+                               , std::optional<color> body_color = std::nullopt
                               )
                                : icon_button_styler_base(size)
                                , _code1(code1)
@@ -68,7 +70,7 @@ namespace cycfi::elements
 
       uint32_t                _code1;
       uint32_t                _code2;
-      color                   _body_color;
+      std::optional<color>    _body_color;
    };
 
    ////////////////////////////////////////////////////////////////////////////
@@ -97,7 +99,7 @@ namespace cycfi::elements
    inline auto toggle_icon_button(
       uint32_t code
     , float size
-    , color body_color = get_theme().default_button_color
+    , std::optional<color> body_color = std::nullopt
    )
    {
       return toggle_button(icon_button_styler{code, size, body_color});
@@ -110,7 +112,7 @@ namespace cycfi::elements
       uint32_t code1
     , uint32_t code2
     , float size
-    , color body_color = get_theme().default_button_color
+    , std::optional<color> body_color = std::nullopt
    )
    {
       return toggle_button(icon_button_styler2{code1, code2, size, body_color});
@@ -122,7 +124,7 @@ namespace cycfi::elements
    inline auto icon_button(
       uint32_t code
     , float size = 1.0f
-    , color body_color = get_theme().default_button_color
+    , std::optional<color> body_color = std::nullopt
    )
    {
       return momentary_button(icon_button_styler{code, size, body_color});

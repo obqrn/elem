@@ -10,6 +10,7 @@
 #include <elements/element/tile.hpp>
 #include <elements/element/style/pane.hpp>
 #include <elements/element/style/icon_button.hpp>
+#include <optional>
 
 namespace cycfi::elements
 {
@@ -25,7 +26,7 @@ namespace cycfi::elements
             title,
             std::forward<Content>(content),
             get_theme().child_window_title_size,
-            get_theme().child_window_opacity
+            std::nullopt // opacity: follow theme at draw time
          )
       );
    }
@@ -62,7 +63,7 @@ namespace cycfi::elements
             title,
             std::forward<Content>(content),
             get_theme().child_window_title_size,
-            get_theme().child_window_opacity
+            std::nullopt // opacity: follow theme at draw time
          )
       );
    }
@@ -123,7 +124,7 @@ namespace cycfi::elements
                title,
                std::forward<Content>(content),
                get_theme().child_window_title_size,
-               get_theme().child_window_opacity
+               std::nullopt // opacity: follow theme at draw time
             )
          )
       );

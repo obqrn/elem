@@ -10,6 +10,7 @@
 #include <elements/element/style/button.hpp>
 #include <elements/element/style/dialog.hpp>
 #include <infra/string_view.hpp>
+#include <optional>
 
 namespace cycfi::elements
 {
@@ -42,7 +43,7 @@ namespace cycfi::elements
     , F&& on_ok
     , std::string ok_text = "OK"
     , extent text_box_size = get_theme().message_textbox_size
-    , color ok_color = get_theme().indicator_color
+    , std::optional<color> ok_color = std::nullopt
    )
    {
       auto textbox = fixed_size(text_box_size, static_text_box{std::move(message)});
@@ -71,7 +72,7 @@ namespace cycfi::elements
     , std::string ok_text = "OK"
     , std::string cancel_text = "Cancel"
     , extent text_box_size = get_theme().message_textbox_size
-    , color ok_color = get_theme().indicator_color
+    , std::optional<color> ok_color = std::nullopt
    )
    {
       auto textbox = fixed_size(text_box_size, static_text_box{std::move(message)});
@@ -103,7 +104,7 @@ namespace cycfi::elements
     , std::string ok_text = "OK"
     , std::string cancel_text = "Cancel"
     , extent text_box_size = get_theme().message_textbox_size
-    , color ok_color = get_theme().indicator_color
+    , std::optional<color> cancel_color = std::nullopt // colors the Cancel button
    )
    {
       auto textbox = fixed_size(text_box_size, static_text_box{std::move(message)});
@@ -117,7 +118,7 @@ namespace cycfi::elements
          std::forward<F2>(on_cancel),
          std::move(ok_text),
          std::move(cancel_text),
-         ok_color
+         cancel_color
       );
    }
 }

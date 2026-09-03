@@ -10,10 +10,12 @@ namespace cycfi::elements
 {
    void panel::draw(context const& ctx)
    {
+      auto const& theme_ = get_theme();
+      auto opacity = _opacity ? *_opacity : theme_.panel_color.alpha;
       draw_panel(
          ctx.canvas
        , ctx.bounds
-       , get_theme().panel_color.opacity(_opacity)
+       , theme_.panel_color.opacity(opacity)
        , 4.0
       );
    }
@@ -25,7 +27,7 @@ namespace cycfi::elements
       auto const&    bounds = ctx.bounds;
 
       canvas_.line_width(theme_.frame_stroke_width);
-      canvas_.stroke_style(colors::black.opacity(0.4));
+      canvas_.stroke_style(theme_.frame_shadow_color);
       canvas_.stroke_round_rect(bounds.move(-1, -1), theme_.frame_corner_radius);
       canvas_.stroke_style(theme_.frame_color);
       canvas_.stroke_round_rect(bounds, theme_.frame_corner_radius);

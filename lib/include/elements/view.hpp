@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <chrono>
 #include <map>
+#include <vector>
 
 namespace cycfi::elements
 {
@@ -127,6 +128,13 @@ namespace cycfi::elements
 
 
    private:
+
+      // Registry of all open views. `set_theme` iterates this list to
+      // refresh every window. UI thread only. Do not modify the registry
+      // (create/destroy views or call set_theme with layout changes) while
+      // a layout pass is running.
+      static std::vector<view*>& views();
+      friend void set_theme(theme const& thm);
 
       scaled_content          make_scaled_content() { return elements::scale(1.0, link(_content)); }
 

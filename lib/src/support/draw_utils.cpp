@@ -290,7 +290,7 @@ namespace cycfi::elements
       }
    }
 
-   void draw_track(canvas& cnv, rect bounds)
+   void draw_track(canvas& cnv, rect bounds, color c)
    {
       auto state = cnv.new_state();
       auto w = bounds.width();
@@ -307,12 +307,17 @@ namespace cycfi::elements
       cnv.add_round_rect(bounds, r);
       cnv.clip();
 
-      cnv.fill_style(colors::black);
+      cnv.fill_style(c);
       cnv.add_round_rect(bounds, r);
       cnv.fill();
 
+      // Inner highlight: contrast against the track, so pick white on
+      // dark tracks and black on light tracks.
+      auto lum = 0.299f*c.red + 0.587f*c.green + 0.114f*c.blue;
       auto lwidth = r/4;
-      cnv.stroke_style(colors::white.opacity(0.3));
+      cnv.stroke_style(
+         lum > 0.5f? colors::black.opacity(0.3) : colors::white.opacity(0.3)
+      );
       cnv.add_round_rect(bounds.move(-lwidth, -lwidth), r*0.6);
       cnv.line_width(lwidth*1.5);
       cnv.stroke();

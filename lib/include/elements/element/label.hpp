@@ -128,8 +128,10 @@ namespace cycfi::elements
    {
       using base_type = label_styler_with_font_size<typename Base::base_type>;
 
-                              label_styler_with_font_size(Base base, float size)
-                               : Base(std::move(base)), _size(size)
+                              label_styler_with_font_size(
+                                 Base base, float size, bool relative = false
+                              )
+                               : Base(std::move(base)), _size(size), _relative(relative)
                               {}
 
       float                   get_font_size() const override;
@@ -139,6 +141,7 @@ namespace cycfi::elements
    private:
 
       float                   _size;
+      bool                    _relative;
    };
 
    /**
@@ -465,7 +468,7 @@ namespace cycfi::elements
    inline typename label_styler_gen<Base>::gen_font_size
    label_styler_gen<Base>::font_size(float size) const
    {
-      return {*this, size};
+      return {*this, size, false};
    }
 
    /**
@@ -485,7 +488,9 @@ namespace cycfi::elements
    inline typename label_styler_gen<Base>::gen_font_size
    label_styler_gen<Base>::relative_font_size(float size) const
    {
-      return {*this, Base::get_default_font_size() * size};
+      // Store the scale factor and resolve the base size from the theme at
+      // layout time, so theme font changes take effect on re-layout.
+      return {*this, size, true};
    }
 
    /**
@@ -711,7 +716,7 @@ namespace cycfi::elements
    template <concepts::LabelStyler Base>
    inline float label_styler_with_font_size<Base>::get_font_size() const
    {
-      return _size;
+      return _relative ? Base::get_default_font_size() * _size : _size;
    }
 
    /**
@@ -728,6 +733,7 @@ namespace cycfi::elements
    inline void label_styler_with_font_size<Base>::set_font_size(float size)
    {
       _size = size;
+      _relative = false;
    }
 
    /**
@@ -743,7 +749,8 @@ namespace cycfi::elements
    template <concepts::LabelStyler Base>
    inline void label_styler_with_font_size<Base>::set_relative_font_size(float size)
    {
-      _size = Base::get_default_font_size() * size;
+      _size = size;
+      _relative = true;
    }
 
    /**

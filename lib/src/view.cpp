@@ -6,6 +6,7 @@
 #include <elements/view.hpp>
 #include <elements/window.hpp>
 #include <elements/support/context.hpp>
+#include <algorithm>
 
  namespace cycfi::elements
  {
@@ -13,13 +14,17 @@
     : base_view(size_)
     , _main_element(make_scaled_content())
     , _work(asio::make_work_guard(_io))
-   {}
+   {
+      views().push_back(this);
+   }
 
    view::view(host_view_handle h)
     : base_view(h)
     , _main_element(make_scaled_content())
     , _work(asio::make_work_guard(_io))
-   {}
+   {
+      views().push_back(this);
+   }
 
    view::view(window& win)
     : base_view(win.host())
@@ -31,11 +36,22 @@
          win.limits(limits_);
       };
       win.limits(_current_limits);
+      // Register last: if anything above throws, the destructor is not
+      // called, so the registry must not hold a dangling pointer
+      views().push_back(this);
    }
 
    view::~view()
    {
+      auto& reg = views();
+      reg.erase(std::remove(reg.begin(), reg.end(), this), reg.end());
       _io.stop();
+   }
+
+   std::vector<view*>& view::views()
+   {
+      static std::vector<view*> reg;
+      return reg;
    }
 
    void view::set_limits()

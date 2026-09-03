@@ -22,7 +22,7 @@ namespace cycfi::elements
    static_text_box::static_text_box(
       std::string text
     , font font_
-    , color color_
+    , std::optional<color> color_
    )
     : _text(std::move(text))
     , _layout(_text.data(), _text.data() + _text.size(), font_, font_.size())
@@ -82,7 +82,7 @@ namespace cycfi::elements
 
       cnv.add_rect(ctx.bounds);
       cnv.clip();
-      cnv.fill_style(_color);
+      cnv.fill_style(get_color());
       for (auto& row : _rows)
       {
          if (y + metrics.descent > clip_extent.top)
@@ -150,10 +150,11 @@ namespace cycfi::elements
       }
       else
       {
+         auto saved = _color;
          auto c = get_color();
          set_color(c.opacity(get_theme().disabled_opacity));
          static_text_box::draw(ctx);
-         set_color(c);
+         _color = saved;
       }
       draw_caret(ctx);
    }
@@ -1076,10 +1077,11 @@ namespace cycfi::elements
       {
          if (!ctx.enabled)
          {
+            auto saved = _color;
             auto c = get_color();
             set_color(c.opacity(0.5));
             basic_text_box::draw(ctx);
-            set_color(c);
+            _color = saved;
          }
          else
          {

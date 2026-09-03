@@ -15,13 +15,24 @@
 #include <array>
 #include <functional>
 #include <vector>
+#include <chrono>
+#include <iostream>
 
 using namespace cycfi::elements;
 using namespace std::chrono_literals;
 
-// Main window background color
-auto constexpr bkd_color = rgba(35, 35, 37, 255);
-auto background = box(bkd_color);
+// Background that follows the active theme's window_background_color
+struct themed_background : element
+{
+   void draw(context const& ctx) override
+   {
+      auto& cnv = ctx.canvas;
+      cnv.begin_path();
+      cnv.add_rect(ctx.bounds);
+      cnv.fill_style(get_theme().window_background_color);
+      cnv.fill();
+   }
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Page: Basic Sliders & Knobs (examples/basic_sliders_and_knobs)
@@ -1802,7 +1813,7 @@ namespace ns_child_window
                std::move(title),
                std::forward<Content>(content),
                get_theme().child_window_title_size,
-               get_theme().child_window_opacity
+               std::nullopt // opacity: follow theme at draw time
             )
          )
       );
@@ -2691,8 +2702,39 @@ int main(int argc, char* argv[])
    if (auto* btn = find_element<basic_button*>(tabs[0].get()))
       btn->value(true);
 
-   // Vertical tab bar on the left
+   // Theme toggle: demonstrates runtime theme switching and measures the
+   // time taken by set_theme (color-only switch → repaint; font/layout
+   // switch → re-layout + repaint).
+   auto theme_toggle = share(toggle_button("Theme: Dark"));
+   std::weak_ptr<std::remove_reference_t<decltype(*theme_toggle)>> weak_toggle =
+      theme_toggle;
+   theme_toggle->on_click =
+      [&view_, weak_toggle](bool state)
+      {
+         auto start = std::chrono::steady_clock::now();
+         set_theme(state ? make_light_theme() : make_dark_theme());
+         auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start
+         ).count();
+         std::cout << "[theme] switched to "
+                   << (state ? "light" : "dark")
+                   << ", set_theme took " << elapsed << " us" << std::endl;
+         // Keep the label in sync with the toggle state (avoid capturing
+         // the shared_ptr by value, which would create a reference cycle)
+         if (auto t = weak_toggle.lock())
+         {
+            t->actual_subject().set_text(
+               state ? "Theme: Light" : "Theme: Dark"
+            );
+            view_.refresh(*t);
+         }
+      };
+
+   // Vertical tab bar on the left, with the theme toggle at the top
    vtile_composite tab_bar;
+   tab_bar.push_back(
+      share(align_center(margin({10, 10, 10, 10}, hold(theme_toggle))))
+   );
    for (auto& t : tabs)
       tab_bar.push_back(share(hold(t)));
 
@@ -2701,7 +2743,7 @@ int main(int argc, char* argv[])
          align_top(std::move(tab_bar)),
          hold(pages)
       ),
-      background
+      themed_background{}
    );
 
    _app.run();

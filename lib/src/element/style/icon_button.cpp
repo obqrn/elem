@@ -74,7 +74,8 @@ namespace cycfi::elements
 
       draw_icon_button(
          ctx, _code, _size * get_theme().icon_font._size
-         , _body_color, value, hilite, enabled
+         , _body_color ? *_body_color : get_theme().default_button_color
+         , value, hilite, enabled
       );
    }
 
@@ -90,7 +91,8 @@ namespace cycfi::elements
 
       draw_icon_button(
          ctx, value? _code2 : _code1, _size * get_theme().icon_font._size
-         , _body_color, false, hilite, enabled
+         , _body_color ? *_body_color : get_theme().default_button_color
+         , false, hilite, enabled
       );
    }
 

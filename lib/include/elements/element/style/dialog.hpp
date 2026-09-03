@@ -15,8 +15,42 @@
 #include <elements/element/style/button.hpp>
 #include <elements/support/theme.hpp>
 
+#include <optional>
+
 namespace cycfi::elements
 {
+   // Dialog button styler: when no explicit color was provided it falls
+   // back at draw time to either the theme's indicator_color (the
+   // historical default for the highlighted OK/Cancel button) or the
+   // regular default_button_color.
+   struct dialog_button_styler : basic_button_styler
+   {
+      enum class fallback { indicator, button };
+
+                              dialog_button_styler(
+                                 std::string text
+                               , std::optional<color> color_ = std::nullopt
+                               , fallback fb = fallback::indicator
+                              )
+                               : basic_button_styler(std::move(text))
+                               , _color(color_)
+                               , _fallback(fb)
+                              {}
+
+      color                   get_body_color() const override
+      {
+         return _color ? *_color :
+            _fallback == fallback::indicator ?
+               get_theme().indicator_color :
+               get_theme().default_button_color
+            ;
+      }
+
+   private:
+
+      std::optional<color>    _color;
+      fallback                _fallback;
+   };
    //--------------------------------------------------------------------------
    // Dialog creation functions
    //--------------------------------------------------------------------------
@@ -37,7 +71,7 @@ namespace cycfi::elements
     , Content&& content
     , F&& on_ok
     , std::string ok_text = "OK"
-    , color ok_color = get_theme().indicator_color
+    , std::optional<color> ok_color = std::nullopt
    );
 
    template <concepts::Element Content, concepts::ElementPtr ButtonPtr>
@@ -60,7 +94,7 @@ namespace cycfi::elements
     , F2&& on_cancel
     , std::string ok_text = "OK"
     , std::string cancel_text = "Cancel"
-    , color ok_color = get_theme().indicator_color
+    , std::optional<color> ok_color = std::nullopt
    );
 
    template <concepts::Element Content, concepts::ElementPtr ButtonPtr>
@@ -83,7 +117,7 @@ namespace cycfi::elements
     , F2&& on_cancel
     , std::string ok_text = "OK"
     , std::string cancel_text = "Cancel"
-    , color cancel_color = get_theme().indicator_color
+    , std::optional<color> cancel_color = std::nullopt
    );
 
    inline void open_popup(element_ptr popup, view& view_);
@@ -322,10 +356,14 @@ namespace cycfi::elements
     , Content&& content
     , F&& on_ok
     , std::string ok_text
-    , color ok_color
+    , std::optional<color> ok_color
    )
    {
-      auto ok_button = share(button(std::move(ok_text), 1.0, ok_color));
+      auto ok_button = share(
+         momentary_button(
+            button_styler_gen<dialog_button_styler>{std::move(ok_text), ok_color}
+         )
+      );
       ok_button->on_click = [on_ok](bool) mutable
       {
          on_ok();
@@ -451,11 +489,22 @@ namespace cycfi::elements
     , F2&& on_cancel
     , std::string ok_text
     , std::string cancel_text
-    , color ok_color
+    , std::optional<color> ok_color
    )
    {
-      auto cancel_button = share(button(std::move(cancel_text), 1.0));
-      auto ok_button = share(button(std::move(ok_text), 1.0, ok_color));
+      auto cancel_button = share(
+         momentary_button(
+            button_styler_gen<dialog_button_styler>{
+               std::move(cancel_text), std::nullopt,
+               dialog_button_styler::fallback::button
+            }
+         )
+      );
+      auto ok_button = share(
+         momentary_button(
+            button_styler_gen<dialog_button_styler>{std::move(ok_text), ok_color}
+         )
+      );
 
       cancel_button->on_click = [on_cancel](bool) mutable
       {
@@ -584,11 +633,22 @@ namespace cycfi::elements
     , F2&& on_cancel
     , std::string ok_text
     , std::string cancel_text
-    , color cancel_color
+    , std::optional<color> cancel_color
    )
    {
-      auto cancel_button = share(button(std::move(cancel_text), 1.0, cancel_color));
-      auto ok_button = share(button(std::move(ok_text), 1.0));
+      auto cancel_button = share(
+         momentary_button(
+            button_styler_gen<dialog_button_styler>{std::move(cancel_text), cancel_color}
+         )
+      );
+      auto ok_button = share(
+         momentary_button(
+            button_styler_gen<dialog_button_styler>{
+               std::move(ok_text), std::nullopt,
+               dialog_button_styler::fallback::button
+            }
+         )
+      );
 
       cancel_button->on_click = [on_cancel](bool) mutable
       {

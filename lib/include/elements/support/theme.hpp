@@ -19,8 +19,10 @@ namespace cycfi::elements
                            theme();
 
       color                panel_color;
+      color                window_background_color;
       color                frame_color;
       color                frame_hilite_color;
+      color                frame_shadow_color;
       float                frame_corner_radius;
       float                frame_stroke_width;
       color                scrollbar_color;
@@ -90,12 +92,27 @@ namespace cycfi::elements
 
       float                child_window_title_size;
       float                child_window_opacity;
+
+      color                slider_track_color;
+      color                slider_thumb_color;
+
+      // True if switching to `other` invalidates element geometry
+      // (fonts, margins, sizes). Color-only changes return false.
+      bool                 layout_changed(theme const& other) const;
    };
+
+   // Factory for the default (dark) theme
+   theme make_dark_theme();
+
+   // Factory for the light theme
+   theme make_light_theme();
 
    // Access to the global theme
    theme const& get_theme();
 
-   // Set the global theme
+   // Set the global theme and refresh all open views. Layout-affecting
+   // changes (fonts, sizes) trigger a re-layout; color-only changes just
+   // repaint. Must be called from the UI thread.
    void set_theme(theme const& thm);
 
    template <typename T>

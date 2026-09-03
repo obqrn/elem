@@ -11,6 +11,8 @@
 #include <elements/element/margin.hpp>
 #include <elements/element/style/misc.hpp>
 
+#include <optional>
+
 namespace cycfi::elements
 {
    ////////////////////////////////////////////////////////////////////////////
@@ -21,7 +23,7 @@ namespace cycfi::elements
       TitleBar&& title_bar,
       Heading&& heading,
       Content&& content,
-      float opacity = get_theme().panel_color.alpha,
+      std::optional<float> opacity = std::nullopt,
       bool center_heading = true
    )
    {
@@ -53,6 +55,7 @@ namespace cycfi::elements
          title_bar{},
          std::forward<Heading>(heading),
          std::forward<Content>(content),
+         std::nullopt,        // opacity: follow theme at draw time
          center_heading
       );
    }
@@ -78,7 +81,7 @@ namespace cycfi::elements
       std::string title,
       Content&& content,
       float title_size = 1.0,
-      float opacity = get_theme().panel_color.alpha,
+      std::optional<float> opacity = std::nullopt,
       bool center_heading = true
    )
    {
@@ -112,7 +115,7 @@ namespace cycfi::elements
       char const* title,
       Content&& content,
       float title_size = 1.0,
-      float opacity = get_theme().panel_color.alpha,
+      std::optional<float> opacity = std::nullopt,
       bool center_heading = true
    )
    {

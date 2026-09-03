@@ -13,6 +13,7 @@
 #include <infra/string_view.hpp>
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace cycfi::elements
 {
@@ -49,7 +50,7 @@ namespace cycfi::elements
                               static_text_box(
                                  std::string text
                                , font font_        = get_theme().text_box_font
-                               , color color_      = get_theme().text_box_font_color
+                               , std::optional<color> color_ = std::nullopt
                               );
 
                               static_text_box(static_text_box&& rhs) = default;
@@ -67,7 +68,7 @@ namespace cycfi::elements
       void                    value(string_view val) override;
 
       void                    set_color(color c)         { _color = c; }
-      color                   get_color() const          { return _color; }
+      color                   get_color() const          { return _color ? *_color : get_theme().text_box_font_color; }
       point                   current_size() const       { return _current_size; };
 
    private:
@@ -79,7 +80,7 @@ namespace cycfi::elements
       std::string             _text;
       mutable master_glyphs   _layout;
       std::vector<glyphs>     _rows;
-      color                   _color;
+      std::optional<color>    _color;
       point                   _current_size = {-1, -1};
    };
 

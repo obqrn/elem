@@ -39,7 +39,7 @@ namespace cycfi::elements
          color icon_c = (value || tracking) ?
             ((enabled && hilite)?
                theme_.indicator_hilite_color : theme_.indicator_bright_color) :
-            colors::black.opacity(theme_.element_background_opacity)
+            theme_.basic_font_color.opacity(theme_.element_background_opacity)
             ;
 
          if (tracking)

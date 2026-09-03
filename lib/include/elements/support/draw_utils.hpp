@@ -33,7 +33,7 @@ namespace cycfi::elements
    void  draw_knob(canvas& cnv, circle cp, color c);
    void  draw_indicator(canvas& cnv, rect bounds, color c);
    void  draw_thumb(canvas& cnv, circle cp, color c, color ic);
-   void  draw_track(canvas& cnv, rect bounds);
+   void  draw_track(canvas& cnv, rect bounds, color c);
 
    void  draw_radial_indicator(canvas& cnv, circle cp, float val, color c);
    void  draw_radial_marks(canvas& cnv, circle cp, float size, color c);

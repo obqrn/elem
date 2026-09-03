@@ -19,6 +19,7 @@
 #include <infra/string_view.hpp>
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace cycfi::elements
 {
@@ -29,7 +30,7 @@ namespace cycfi::elements
    button_menu(
       std::string text
     , menu_position pos = menu_position::bottom_right
-    , color body_color = get_theme().default_button_color
+    , std::optional<color> body_color = std::nullopt
    )
    {
       auto icon =

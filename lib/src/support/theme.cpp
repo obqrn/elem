@@ -11,8 +11,10 @@ namespace cycfi::elements
 {
    theme::theme()
     : panel_color                {rgba(28, 30, 34, 192)}
+    , window_background_color    {rgba(35, 35, 37, 255)}
     , frame_color                {rgba(220, 220, 220, 80)}
     , frame_hilite_color         {rgba(220, 220, 220, 160)}
+    , frame_shadow_color         {rgba(0, 0, 0, 102)}
     , frame_corner_radius        {3.0}
     , frame_stroke_width         {1.0}
     , scrollbar_color            {rgba(80, 80, 80, 80)}
@@ -88,7 +90,91 @@ namespace cycfi::elements
 
     , child_window_title_size    {1.0}
     , child_window_opacity       {0.95}
+
+    , slider_track_color         {rgba(0, 0, 0, 255)}
+    , slider_thumb_color         {rgba(0, 0, 0, 255)}
    {
+   }
+
+   namespace
+   {
+      bool same_font(font_descr const& a, font_descr const& b)
+      {
+         return a._families == b._families
+            && a._size == b._size
+            && a._weight == b._weight
+            && a._slant == b._slant
+            && a._stretch == b._stretch;
+      }
+   }
+
+   bool theme::layout_changed(theme const& other) const
+   {
+      // Note: child_window_title_size / dialog_button_size /
+      // message_textbox_size are baked when their controls are created,
+      // so changing them does not invalidate existing layouts and is
+      // intentionally NOT compared here.
+      return
+         !same_font(system_font, other.system_font)
+      || !same_font(heading_font, other.heading_font)
+      || !same_font(label_font, other.label_font)
+      || !same_font(icon_font, other.icon_font)
+      || !same_font(text_box_font, other.text_box_font)
+      || !same_font(mono_spaced_font, other.mono_spaced_font)
+      || scrollbar_width != other.scrollbar_width
+      || button_margin != other.button_margin
+      || slide_button_size != other.slide_button_size
+      || button_text_icon_space != other.button_text_icon_space
+      ;
+   }
+
+   theme make_dark_theme()
+   {
+      return theme{};
+   }
+
+   theme make_light_theme()
+   {
+      theme thm;
+
+      thm.panel_color                = rgba(242, 243, 247, 225);
+      thm.window_background_color    = rgba(232, 233, 238, 255);
+      thm.frame_color                = rgba(0, 0, 0, 60);
+      thm.frame_hilite_color         = rgba(0, 0, 0, 120);
+      thm.frame_shadow_color         = rgba(0, 0, 0, 40);
+      thm.scrollbar_color            = rgba(0, 0, 0, 60);
+      thm.default_button_color       = rgba(0, 0, 0, 25);
+      thm.slide_button_on_color      = rgba(0, 110, 230, 220);
+      thm.slide_button_base_color    = rgba(0, 0, 0, 50);
+      thm.slide_button_thumb_color   = rgba(255, 255, 255, 255);
+      thm.active_tab_color           = rgba(0, 0, 0, 90);
+
+      thm.controls_color             = rgba(40, 90, 140, 230);
+      thm.indicator_color            = rgba(0, 110, 230, 220);
+      // On a light background, brighter = closer to white = less visible.
+      // Explicitly pick darker, more saturated blues for the bright/hilite
+      // variants instead of the dark theme's level(>1) derivation.
+      thm.indicator_bright_color     = rgba(0, 90, 190, 255);
+      thm.indicator_hilite_color     = rgba(0, 60, 150, 255);
+      thm.basic_font_color           = rgba(20, 20, 24, 230);
+
+      thm.heading_font_color         = thm.basic_font_color;
+      thm.label_font_color           = thm.basic_font_color;
+      thm.icon_color                 = thm.basic_font_color;
+
+      thm.text_box_font_color        = thm.basic_font_color;
+      thm.text_box_hilite_color      = rgba(0, 110, 230, 60);
+      thm.text_box_caret_color       = rgba(0, 90, 200, 255);
+      thm.inactive_font_color        = rgba(0, 0, 0, 90);
+
+      thm.ticks_color                = rgba(0, 0, 0, 90);
+      thm.major_grid_color           = rgba(0, 0, 0, 60);
+      thm.minor_grid_color           = thm.indicator_color;
+
+      thm.slider_track_color         = rgba(0, 0, 0, 50);
+      thm.slider_thumb_color         = rgba(30, 30, 34, 255);
+
+      return thm;
    }
 
    // The global theme
@@ -105,6 +191,19 @@ namespace cycfi::elements
 
    void set_theme(theme const& thm)
    {
-      global_theme::_theme() = thm;
+      auto& current = global_theme::_theme();
+      bool relayout = thm.layout_changed(current);
+      current = thm;
+
+      // Iterate over a snapshot: a layout() pass may indirectly create or
+      // destroy views, which would invalidate iterators into the live list.
+      auto reg = view::views();
+      for (auto* v : reg)
+      {
+         if (relayout)
+            v->layout();   // layout() also refreshes
+         else
+            v->refresh();
+      }
    }
 }
