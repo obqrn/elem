@@ -229,6 +229,20 @@ namespace cycfi::elements
 
    void draw_thumb(canvas& cnv, circle cp, color c, color ic)
    {
+      if (get_theme().ui_style == ui_style_enum::winui_style)
+      {
+         // WinUI slider knob: flat circle with a subtle border
+         auto state = cnv.new_state();
+         cnv.fill_style(c);
+         cnv.begin_path();
+         cnv.add_circle(cp);
+         cnv.fill();
+         cnv.line_width(1);
+         cnv.stroke_style(colors::black.opacity(0.3));
+         cnv.stroke();
+         return;
+      }
+
       auto state = cnv.new_state();
       float radius = cp.radius;
 
@@ -310,6 +324,9 @@ namespace cycfi::elements
       cnv.fill_style(c);
       cnv.add_round_rect(bounds, r);
       cnv.fill();
+
+      if (get_theme().ui_style == ui_style_enum::winui_style)
+         return; // flat thin track: no inner highlight
 
       // Inner highlight: contrast against the track, so pick white on
       // dark tracks and black on light tracks.

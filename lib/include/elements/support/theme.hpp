@@ -12,6 +12,15 @@ namespace cycfi::elements
 {
    enum class dial_mode_enum : int;
 
+   // Control skin, orthogonal to the dark/light color scheme. `winui_style`
+   // switches control drawing to flat Fluent/WinUI-like visuals (subtle
+   // buttons, ToggleSwitch, checkbox, slider knob).
+   enum class ui_style_enum : int
+   {
+      default_style,  // classic Elements look (gradient buttons, etc.)
+      winui_style     // flat Fluent/WinUI-like look
+   };
+
    class theme
    {
    public:
@@ -42,6 +51,8 @@ namespace cycfi::elements
       color                indicator_color;
       color                indicator_bright_color;
       color                indicator_hilite_color;
+      color                accent_color;
+      ui_style_enum        ui_style;
       color                basic_font_color;
       float                disabled_opacity;
 
@@ -101,11 +112,24 @@ namespace cycfi::elements
       bool                 layout_changed(theme const& other) const;
    };
 
+   // True when the theme's basic text is bright (light color scheme).
+   // Stylers use this to pick contrasting strokes and glyphs.
+   inline bool is_light_theme(theme const& thm)
+   {
+      auto c = thm.basic_font_color;
+      auto lum = 0.299f*c.red + 0.587f*c.green + 0.114f*c.blue;
+      return lum > 0.5f;
+   }
+
    // Factory for the default (dark) theme
    theme make_dark_theme();
 
    // Factory for the light theme
    theme make_light_theme();
+
+   // Factory for the WinUI (Fluent) style theme. The style is orthogonal to
+   // the color scheme: pass `dark = false` for a light WinUI theme.
+   theme make_winui_theme(bool dark = true);
 
    // Access to the global theme
    theme const& get_theme();

@@ -4,6 +4,7 @@
    Distributed under the MIT License [ https://opensource.org/licenses/MIT ]
 =============================================================================*/
 #include <elements/element/style/button.hpp>
+#include <algorithm>
 
 namespace cycfi::elements
 {
@@ -11,6 +12,66 @@ namespace cycfi::elements
       context const& ctx, rect bounds, color color_, bool enabled, corner_radii corner_radii)
    {
       draw_button(ctx.canvas, bounds, color_, enabled, corner_radii);
+   }
+
+   namespace
+   {
+      // Flat Fluent-style button body: solid subtle fill, slightly
+      // lighter on hover, darker when pressed, thin border while active.
+      void draw_winui_button(
+         context const& ctx, rect bounds, color c, bool enabled
+       , bool hilite, bool pressed, corner_radii radii)
+      {
+         auto& cnv = ctx.canvas;
+         auto state = cnv.new_state();
+         auto const& theme_ = get_theme();
+         bool light = is_light_theme(theme_);
+
+         color body = c;
+         if (enabled)
+         {
+            if (c.alpha < 0.5f)
+            {
+               // Subtle fills (white/black alpha tints): raise the alpha
+               // on hover and more so when pressed.
+               auto k = light? (pressed? 1.8f : 1.3f) : (pressed? 2.0f : 1.5f);
+               body = c.opacity(std::min(1.0f, c.alpha * k));
+            }
+            else
+            {
+               // Solid or accent fills: shift brightness in the same
+               // direction (darker on light schemes, brighter on dark).
+               auto k = light? (pressed? 0.7f : 0.85f) : (pressed? 1.3f : 1.15f);
+               body = color{
+                  std::min(c.red*k, 1.0f)
+                , std::min(c.green*k, 1.0f)
+                , std::min(c.blue*k, 1.0f)
+                , c.alpha
+               };
+            }
+         }
+         else
+         {
+            body = c.opacity(c.alpha * theme_.disabled_opacity);
+         }
+
+         auto r = bounds.inset(0.5, 0.5);
+         cnv.begin_path();
+         draw_round_rect(cnv, r, radii);
+         cnv.fill_style(body);
+         cnv.fill();
+
+         if (enabled && (hilite || pressed))
+         {
+            cnv.begin_path();
+            draw_round_rect(cnv, r, radii);
+            cnv.line_width(1);
+            cnv.stroke_style(
+               light? colors::black.opacity(0.1) : colors::white.opacity(0.1)
+            );
+            cnv.stroke();
+         }
+      }
    }
 
    bool button_styler_base::cursor(context const& ctx, point /*p*/, cursor_tracking /*status*/)
@@ -69,23 +130,33 @@ namespace cycfi::elements
       auto value = btn->value();
       auto hilite = btn->hilite();
       auto enabled = ctx.enabled;
-      auto body_color = value?
-         get_active_body_color().opacity(0.5) :
-         get_body_color().level(0.9)
-         ;
+
+      auto radii = corner_radii{
+         get_corner_radius_top_left()*rel_size,
+         get_corner_radius_top_right()*rel_size,
+         get_corner_radius_bottom_right()*rel_size,
+         get_corner_radius_bottom_left()*rel_size
+      };
 
       // Draw the body
-      if (value)
-         bounds = bounds.move(1, 1);
+      if (theme.ui_style == ui_style_enum::winui_style)
+      {
+         draw_winui_button(
+            ctx, bounds, get_body_color(), enabled, hilite, value, radii
+         );
+      }
+      else
+      {
+         auto body_color = value?
+            get_active_body_color().opacity(0.5) :
+            get_body_color().level(0.9)
+            ;
 
-      draw_button_base(ctx, bounds, body_color, enabled,
-         {
-            get_corner_radius_top_left()*rel_size,
-            get_corner_radius_top_right()*rel_size,
-            get_corner_radius_bottom_right()*rel_size,
-            get_corner_radius_bottom_left()*rel_size
-         }
-      );
+         if (value)
+            bounds = bounds.move(1, 1);
+
+         draw_button_base(ctx, bounds, body_color, enabled, radii);
+      }
 
       // Adjust the font size
       auto font = theme.label_font;
@@ -110,7 +181,7 @@ namespace cycfi::elements
          text_c.opacity(text_c.alpha * theme.disabled_opacity)
          ;
 
-      if (hilite && enabled)
+      if (hilite && enabled && theme.ui_style != ui_style_enum::winui_style)
          text_c = text_c.level(1.5);
 
       auto mid_x = bounds.left + (bounds.width() / 2);

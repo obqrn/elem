@@ -959,6 +959,115 @@ namespace ns_buttons
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Page: WinUI (Fluent-style controls under make_winui_theme)
+///////////////////////////////////////////////////////////////////////////////
+namespace ns_winui
+{
+   auto make_buttons()
+   {
+      auto normal   = button("Button");
+      auto disabled = button("Disabled");
+      auto toggle   = toggle_button("Toggle");
+      auto accent   = button(
+         icons::cog, "Settings", 1.0, colors::dodger_blue.opacity(0.9));
+
+      disabled.enable(false);
+
+      return
+         group("Buttons",
+            margin({10, 45, 20, 10},
+               htile(
+                  align_center(normal),
+                  align_center(disabled),
+                  align_center(toggle),
+                  align_center(accent)
+               )
+            )
+         );
+   }
+
+   auto make_switches()
+   {
+      auto on       = slide_switch();
+      auto off      = slide_switch();
+      auto disabled = slide_switch();
+
+      on.value(true);
+      disabled.enable(false);
+
+      return
+         group("Toggle Switches",
+            margin({10, 45, 20, 10},
+               htile(
+                  align_center(on),
+                  align_center(off),
+                  align_center(disabled)
+               )
+            )
+         );
+   }
+
+   auto make_check_boxes()
+   {
+      auto checked   = check_box("Checked");
+      auto unchecked = check_box("Unchecked");
+      auto disabled  = check_box("Disabled");
+
+      checked.value(true);
+      disabled.enable(false);
+
+      return
+         group("Check Boxes",
+            margin({10, 45, 20, 10},
+               htile(
+                  align_center(checked),
+                  align_center(unchecked),
+                  align_center(disabled)
+               )
+            )
+         );
+   }
+
+   auto make_slider()
+   {
+      auto s = slider(basic_thumb<16>(), basic_track<4>(), 0.5);
+
+      return
+         group("Slider",
+            margin({10, 45, 20, 10},
+               align_middle(hsize(400, s))
+            )
+         );
+   }
+
+   auto make_text_entry()
+   {
+      auto tbox = input_box("Enter text");
+
+      return
+         group("Text Entry",
+            margin({10, 45, 20, 10},
+               align_middle(hsize(300, tbox.first))
+            )
+         );
+   }
+
+   auto make_page()
+   {
+      return
+         vscroller(
+            vtile(
+               make_buttons(),
+               make_switches(),
+               make_check_boxes(),
+               make_slider(),
+               make_text_entry()
+            )
+         );
+   }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Page: Menus (examples/menus)
 ///////////////////////////////////////////////////////////////////////////////
 namespace ns_menus
@@ -2657,6 +2766,7 @@ int main(int argc, char* argv[])
       {"Sprite Sliders",   [](view& v) { return share(ns_sprite_sliders::make_page(v)); }},
       {"Range Sliders",    [](view& v) { return share(ns_range_slider::make_page(v)); }},
       {"Buttons",          [](view& v) { return share(ns_buttons::make_page(v)); }},
+      {"WinUI",            [](view&  ) { return share(ns_winui::make_page()); }},
       {"Menus",            [](view&  ) { return share(ns_menus::make_page()); }},
       {"Text & Icons",     [](view& v) { return share(ns_text_icons::make_page(v)); }},
       {"Text Edit",        [](view&  ) { return share(ns_text_edit::make_page()); }},
@@ -2716,23 +2826,44 @@ int main(int argc, char* argv[])
    if (auto* btn = find_element<basic_button*>(tabs[0].get()))
       btn->value(true);
 
-   // Theme toggle: demonstrates runtime theme switching and measures the
-   // time taken by set_theme (color-only switch → repaint; font/layout
-   // switch → re-layout + repaint).
+   // Theme toggles: the scheme toggle switches dark/light and the style
+   // toggle switches classic/WinUI skins. They compose, so any scheme can
+   // be combined with either skin (set_theme: color-only switch repaints,
+   // font/layout switch re-layouts).
    auto theme_toggle = share(toggle_button("Theme: Dark"));
+   auto style_toggle = share(toggle_button("WinUI Style: Off"));
    std::weak_ptr<std::remove_reference_t<decltype(*theme_toggle)>> weak_toggle =
       theme_toggle;
+   std::weak_ptr<std::remove_reference_t<decltype(*style_toggle)>> weak_style =
+      style_toggle;
+
+   auto apply_theme = [](bool dark, bool winui)
+   {
+      auto start = std::chrono::steady_clock::now();
+      set_theme(
+         winui? make_winui_theme(dark) :
+         dark? make_dark_theme() :
+         make_light_theme()
+      );
+      auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+         std::chrono::steady_clock::now() - start
+      ).count();
+      std::cout << "[theme] switched to "
+                << (winui? "winui-" : "")
+                << (dark? "dark" : "light")
+                << ", set_theme took " << elapsed << " us" << std::endl;
+   };
+
    theme_toggle->on_click =
-      [&view_, weak_toggle](bool state)
+      [&view_, weak_toggle, weak_style, apply_theme](bool state)
       {
-         auto start = std::chrono::steady_clock::now();
-         set_theme(state ? make_light_theme() : make_dark_theme());
-         auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - start
-         ).count();
-         std::cout << "[theme] switched to "
-                   << (state ? "light" : "dark")
-                   << ", set_theme took " << elapsed << " us" << std::endl;
+         bool dark = !state;
+         bool winui = false;
+         if (auto t = weak_style.lock())
+            winui = t->value();
+
+         apply_theme(dark, winui);
+
          // Keep the label in sync with the toggle state (avoid capturing
          // the shared_ptr by value, which would create a reference cycle)
          if (auto t = weak_toggle.lock())
@@ -2744,10 +2875,31 @@ int main(int argc, char* argv[])
          }
       };
 
-   // Vertical tab bar on the left, with the theme toggle at the top
+   style_toggle->on_click =
+      [&view_, weak_toggle, weak_style, apply_theme](bool state)
+      {
+         bool dark = true;
+         if (auto t = weak_toggle.lock())
+            dark = !t->value();
+
+         apply_theme(dark, state);
+
+         if (auto t = weak_style.lock())
+         {
+            t->actual_subject().set_text(
+               state ? "WinUI Style: On" : "WinUI Style: Off"
+            );
+            view_.refresh(*t);
+         }
+      };
+
+   // Vertical tab bar on the left, with the theme toggles at the top
    vtile_composite tab_bar;
    tab_bar.push_back(
       share(align_center(margin({10, 10, 10, 10}, hold(theme_toggle))))
+   );
+   tab_bar.push_back(
+      share(align_center(margin({10, 0, 10, 10}, hold(style_toggle))))
    );
    for (auto& t : tabs)
       tab_bar.push_back(share(hold(t)));

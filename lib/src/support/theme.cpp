@@ -34,6 +34,8 @@ namespace cycfi::elements
     , indicator_color            {rgba(0, 127, 255, 200)}
     , indicator_bright_color     {indicator_color.level(1.5)}
     , indicator_hilite_color     {indicator_color.level(2.0)}
+    , accent_color               {indicator_color}
+    , ui_style                   {ui_style_enum::default_style}
     , basic_font_color           {rgba(220, 220, 220, 200)}
     , disabled_opacity           {0.45}
 
@@ -156,6 +158,7 @@ namespace cycfi::elements
       // variants instead of the dark theme's level(>1) derivation.
       thm.indicator_bright_color     = rgba(0, 90, 190, 255);
       thm.indicator_hilite_color     = rgba(0, 60, 150, 255);
+      thm.accent_color               = thm.indicator_color;
       thm.basic_font_color           = rgba(20, 20, 24, 230);
 
       thm.heading_font_color         = thm.basic_font_color;
@@ -173,6 +176,63 @@ namespace cycfi::elements
 
       thm.slider_track_color         = rgba(0, 0, 0, 50);
       thm.slider_thumb_color         = rgba(30, 30, 34, 255);
+
+      return thm;
+   }
+
+   theme make_winui_theme(bool dark)
+   {
+      theme thm = dark? make_dark_theme() : make_light_theme();
+
+      thm.ui_style                   = ui_style_enum::winui_style;
+
+      // Fluent accent: lighter shade on dark surfaces so interactive
+      // controls stay readable, Windows default accent on light.
+      thm.accent_color               = dark?
+         rgba(96, 205, 255, 255) :
+         rgba(0, 120, 212, 255);
+
+      thm.indicator_color            = thm.accent_color;
+      if (dark)
+      {
+         thm.indicator_bright_color  = thm.accent_color.level(1.2);
+         thm.indicator_hilite_color  = thm.accent_color.level(1.5);
+      }
+      else
+      {
+         // Same rationale as make_light_theme: brighter is less visible
+         // on a light background, so pick darker variants.
+         thm.indicator_bright_color  = rgba(0, 90, 190, 255);
+         thm.indicator_hilite_color  = rgba(0, 60, 150, 255);
+      }
+
+      // Subtle button surfaces (WinUI rest fill: white 6% on dark,
+      // black 8% on light)
+      thm.default_button_color       = dark?
+         rgba(255, 255, 255, 16) :
+         rgba(0, 0, 0, 20);
+
+      // ToggleSwitch: 40x20 track with a smaller knob
+      thm.slide_button_size          = {40, 20};
+      thm.slide_button_on_color      = thm.accent_color;
+      thm.slide_button_base_color    = dark?
+         rgba(255, 255, 255, 41) :
+         rgba(0, 0, 0, 100);
+      thm.slide_button_thumb_color   = rgba(255, 255, 255, 255);
+
+      // Slider: thin neutral track, light knob
+      thm.slider_track_color         = dark?
+         rgba(255, 255, 255, 36) :
+         rgba(0, 0, 0, 40);
+      thm.slider_thumb_color         = rgba(255, 255, 255, 255);
+
+      // Text box focus colors follow the accent
+      thm.text_box_hilite_color      = thm.accent_color.opacity(dark? 0.3 : 0.2);
+      thm.text_box_caret_color       = thm.accent_color;
+
+      thm.active_tab_color           = dark?
+         rgba(255, 255, 255, 20) :
+         rgba(0, 0, 0, 10);
 
       return thm;
    }
