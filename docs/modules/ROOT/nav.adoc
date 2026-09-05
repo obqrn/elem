@@ -10,6 +10,7 @@
 ** xref:layout/alignment.adoc[Alignment]
 ** xref:layout/margins.adoc[Margins]
 ** xref:layout/floating.adoc[Floating]
+** xref:layout/child-window.adoc[Child Window]
 ** xref:layout/tiles.adoc[Tiles]
 ** xref:layout/grids.adoc[Grids]
 ** xref:layout/layers.adoc[Layers]

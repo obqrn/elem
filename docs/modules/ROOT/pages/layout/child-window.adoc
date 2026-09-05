@@ -1,0 +1,114 @@
+= Child Window
+
+include::../common.adoc[]
+
+== Overview
+
+Child windows are floating elements that can overlap other elements in the
+main view. A child window wraps its content in a movable, resizable pane with
+a title bar and optional window buttons. Unlike plain
+xref:layout/floating.adoc[floating] elements, a child window that contains
+movable or resizable subjects:
+
+* Moves to the front when clicked (z-order raise).
+* Captures clicks that land on it, including areas that cover navigation or
+other interactive elements (no click-through).
+* Can be closed, minimized, or maximized from title-bar buttons.
+
+== standard_child_window
+
+Creates a movable, resizable child window with a title bar and window
+buttons.
+
+=== Notation
+
+`title`:: Window title text, `std::string`
+`bounds`:: The boundaries of the window (`rect`)
+`content`:: The content element, instance of `Element`
+`options`:: Bit flags selecting the title-bar buttons: `window_closable`,
+`window_minimizable`, `window_maximizable` (all enabled by default)
+
+=== Expression
+
+[,c++]
+----
+standard_child_window(title, bounds, content, options)
+----
+
+=== Example
+
+[,c++]
+----
+auto cw2 = share(
+   standard_child_window(
+      "Child Window 2", rect{60, 60, 350, 250},
+      hmin_size(250, scroller(image{"deep_space.jpg"}))
+   )
+);
+
+auto cw1 = share(
+   standard_child_window(
+      "Child Window 1", rect{10, 10, 300, 200},
+      hmin_size(250, scroller(image{"deep_space.jpg"}))
+   )
+);
+
+// Elements are stacked in insertion order: the first pushed element is
+// drawn first (bottom); the last pushed element is on top.
+layer_composite result;
+result.push_back(cw2);
+result.push_back(cw1);
+----
+
+== basic_child_window
+
+Creates a movable child window with a title bar, but no window buttons.
+Use it when the window should not be closed, minimized, or maximized.
+
+[,c++]
+----
+basic_child_window(title, bounds, content)
+----
+
+NOTE: `closable_child_window` is deprecated; use `standard_child_window`
+with `window_closable` instead.
+
+== Semantics
+
+. A click anywhere on the child window raises it to the front of its
+container (z-order). The raise is deferred and the click is replayed so
+that interactive parts of the window (e.g. buttons) still receive it.
+. The window captures clicks over its entire bounds, including the area
+covering navigation controls or other elements below. Clicks do not pass
+through.
+. Raising and closing are only supported in layer-like containers:
+
+|===
+| Container | Raise on click | Close
+| `layer_composite` (std::vector) | ✓ | ✓
+| `layer(...)` (std::array) | ✓ | — (fixed size; no erasure)
+| `deck` / `deck_composite` | — (protects the selected index) | —
+| Layout containers (`vtile`, `htile`, `grid`) | — (reordering would move layout slots) | —
+| Top-level (direct child of the `view`) | n/a (always on top) | ✓ (`view::remove`)
+|===
+
+In containers marked with —, the window still captures the click, but the
+action degrades to a no-op. This behavior is intentional: reordering or
+erasing elements in layout composites shifts indices and corrupts
+per-slot layout state, and deck elements rely on a stable selected index.
+
+. Closing removes the window from its container. The removal is deferred
+(via `view::post`) because it is triggered from within the click dispatch
+of the element being removed. After erasure, the container is reset,
+re-laid out, and refreshed.
+. Minimizing and maximizing set the window bounds to the subject's
+natural {limits} (minimum and maximum, respectively).
+. The title bar size and pane opacity follow the current theme, so runtime
+theme switching applies to child windows automatically.
+
+See {layout} for more on layout composition and {Layers} for stacking order.
+
+'''
+
+_Copyright (c) 2014-2024 Joel de Guzman. All rights reserved._
+_Distributed under the {mit_license}_

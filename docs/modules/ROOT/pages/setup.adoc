@@ -288,6 +288,26 @@ Tips:
 . Resize the window and see the elements fluidly resize
 . Use two-finger swipe to move the sliders and knobs
 
+== Runtime theme switching
+
+Elements ships with two built-in themes: `make_dark_theme()` and
+`make_light_theme()`. The global theme is accessible via `get_theme()` and
+can be replaced at runtime with `set_theme()`:
+
+[,c++]
+----
+set_theme(make_light_theme());
+----
+
+. `set_theme` refreshes all open views. Layout-affecting changes (fonts,
+sizes) trigger a re-layout; color-only changes just repaint.
+. `set_theme` must be called from the UI thread.
+. Use `override_theme` for temporary, scoped overrides of a single theme
+member.
+
+The `sampler` example has a Theme toggle button that demonstrates runtime
+switching between the dark and light themes.
+
 == Building Outside the Project
 
 The Elements project is set up so that you can easily copy and paste any of the examples outside the project, set -DELEMENTS_ROOT="path/to/elements", and the example should immediately build without any hassle.
