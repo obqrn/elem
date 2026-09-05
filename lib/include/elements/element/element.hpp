@@ -61,6 +61,7 @@ namespace cycfi::elements
       virtual view_stretch    stretch() const;
       virtual unsigned        span() const;
       virtual element*        hit_test(context const& ctx, point p, bool leaf, bool control);
+      virtual bool            floating_content() const;
       virtual void            draw(context const& ctx);
       virtual void            layout(context const& ctx);
       virtual void            refresh(context const& ctx, element& e, int outward = 0);

@@ -66,6 +66,7 @@ namespace cycfi::elements
       view_stretch            stretch() const override;
       unsigned                span() const override;
       element*                hit_test(context const& ctx, point p, bool leaf, bool control) override;
+      bool                    floating_content() const override;
       void                    draw(context const& ctx) override;
       void                    layout(context const& ctx) override;
       void                    refresh(context const& ctx, element& element, int outward = 0) override;
@@ -100,6 +101,9 @@ namespace cycfi::elements
    {
       virtual element&        get() = 0;
       virtual element const&  get() const = 0;
+
+      bool                    wants_control() const override
+                              { return get().wants_control(); }
    };
 
    /**
@@ -200,6 +204,13 @@ namespace cycfi::elements
    indirect<Base>::hit_test(context const& ctx, point p, bool leaf, bool control)
    {
       return this->get().hit_test(ctx, p, leaf, control);
+   }
+
+   template <concepts::Element Base>
+   inline bool
+   indirect<Base>::floating_content() const
+   {
+      return this->get().floating_content();
    }
 
    template <concepts::Element Base>

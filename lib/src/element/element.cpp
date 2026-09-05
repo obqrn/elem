@@ -148,6 +148,11 @@ namespace cycfi::elements
       return (ctx.bounds.includes(p)) ? this : nullptr;
    }
 
+   bool element::floating_content() const
+   {
+      return false;
+   }
+
    /**
     * \brief
     *    Handles the drawing of an element given the provided context.

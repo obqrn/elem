@@ -5,32 +5,87 @@
 =============================================================================*/
 #include <elements/element/child_window.hpp>
 #include <elements/element/floating.hpp>
+#include <elements/element/composite.hpp>
+#include <elements/element/layer.hpp>
 #include <elements/view.hpp>
 
 namespace cycfi::elements
 {
+   element* child_window_element::hit_test(context const& ctx, point p, bool leaf, bool control)
+   {
+      // Ask the subject first
+      auto r = proxy_base::hit_test(ctx, p, leaf, control);
+      if (r)
+         return r;
+
+      // The subject has no hit. If the point is within the window bounds,
+      // capture the hit so the window can raise to the front when clicked.
+      if (ctx.enabled && is_enabled() && this->bounds().includes(p))
+         return this;
+      return nullptr;
+   }
+
    bool child_window_element::click(context const& ctx, mouse_button btn)
    {
       if (btn.down)
       {
          auto this_ = shared_from_this();
-         // If the child window is not already at the front,
-         if (ctx.view.layers().back() != this_)
-         {
-            // Move child window to the front
-            ctx.view.move_to_front(this_);
 
-            // Simulate a view click for continuation
-            ctx.view.post(
-               [btn, &view = ctx.view]()
+         // Direct child of the view?
+         if (ctx.view.is_open(this_))
+         {
+            // If the child window is not already at the front,
+            if (ctx.view.layers().back() != this_)
+            {
+               // Move child window to the front
+               ctx.view.move_to_front(this_);
+
+               // Simulate a view click for continuation
+               ctx.view.post(
+                  [btn, &view = ctx.view]()
+                  {
+                     view.click(btn);
+                  }
+               );
+               return true;
+            }
+         }
+         else if (auto parent = find_parent<composite_base*>(ctx))
+         {
+            // Nested inside a composite: raise within the parent. This is
+            // only correct for layer-like composites, where container
+            // order determines z-order only. For layout composites
+            // (vtile/htile/grid), container order determines layout
+            // slots, so reordering would move the window to a different
+            // slot. Deck elements are also excluded since reordering
+            // would invalidate the selected index. In unsupported
+            // containers the window still captures the click but does
+            // not raise.
+            if (dynamic_cast<layer_element const*>(parent)
+               && !dynamic_cast<deck_element const*>(parent))
+            {
+               bool raised = parent->move_to_front(this_);
+               if (raised)
                {
-                  view.click(btn);
+                  parent->reset();
+                  ctx.view.refresh();
+                  ctx.view.post(
+                     [btn, &view = ctx.view]()
+                     {
+                        view.click(btn);
+                     }
+                  );
+                  return true;
                }
-            );
-            return true;
+            }
          }
       }
       return floating_element::click(ctx, btn);
+   }
+
+   bool child_window_element::wants_control() const
+   {
+      return true;
    }
 
    element* movable_base::hit_test(context const& ctx, point p, bool /*leaf*/, bool /*control*/)
@@ -229,18 +284,64 @@ namespace cycfi::elements
       }
    }
 
-   void close_floating_element(context& ctx, floating_element* fl)
+   composite_base* nested_parent_composite(context const& ctx)
    {
-      ctx.view.remove(fl->shared_from_this());
+      if (auto fc = find_parent_context<floating_element*>(ctx))
+      {
+         if (fc->parent && fc->parent->element)
+         {
+            auto parent = dynamic_cast<composite_base*>(fc->parent->element);
+
+            // Closing (erasing from the container) is only supported for
+            // layer-like composites. Layout composites (vtile/htile/grid)
+            // store per-index layout state, so erasure would shift indices
+            // and corrupt neighbor bounds. Deck elements are excluded
+            // since erasure would invalidate the selected index.
+            if (parent
+               && dynamic_cast<layer_element const*>(parent)
+               && !dynamic_cast<deck_element const*>(parent))
+               return parent;
+         }
+      }
+      return nullptr;
    }
 
-   void minimize_floating_element(context& ctx, floating_element* fl)
+   void close_floating_element(
+      view& view_, floating_element* fl, composite_base* parent
+   )
    {
-      fl->minimize(ctx);
-   }
+      auto this_ = fl->shared_from_this();
 
-   void maximize_floating_element(context& ctx, floating_element* fl)
-   {
-      fl->maximize(ctx);
+      // Direct child of the view?
+      if (view_.is_open(this_))
+      {
+         view_.remove(this_);
+         return;
+      }
+
+      // Nested inside a layer-like composite: remove the floating element
+      // from its parent. We are in the middle of dispatching a click
+      // inside the element being removed, so defer the erase. Child
+      // windows nested in layout composites (vtile/htile/grid) or in
+      // fixed-size containers (std::array) are intentionally not
+      // closable; see nested_parent_composite.
+      if (parent)
+      {
+         view_.post(
+            [&view_ = view_, parent, this_]()
+            {
+               if (parent->erase_element(this_))
+               {
+                  parent->reset();
+
+                  // Recompute layout: erasure shifts indices and
+                  // containers with per-index layout state (e.g. tiles)
+                  // would otherwise keep stale bounds.
+                  view_.layout();
+                  view_.refresh();
+               }
+            }
+         );
+      }
    }
 }

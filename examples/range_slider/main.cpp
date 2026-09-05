@@ -7,18 +7,50 @@
 
 using namespace cycfi::elements;
 
-// Main window background color
-auto constexpr bg_color_accent  = rgba(55, 55, 57, 255);
-auto constexpr bg_color         = rgba(35, 35, 37, 255);
-auto constexpr bred             = colors::red.level(0.7).opacity(0.4);
-auto background                 = box(bg_color);
+// Background that follows the active theme's window_background_color
+struct themed_background : element
+{
+   void draw(context const& ctx) override
+   {
+      auto& cnv = ctx.canvas;
+      cnv.begin_path();
+      cnv.add_rect(ctx.bounds);
+      cnv.fill_style(get_theme().window_background_color);
+      cnv.fill();
+   }
+};
+
+// Background for the min/max input boxes: follows the active theme.
+// idle = window background color; active = indicator tint; error = red.
+struct input_box_bg : element
+{
+   enum state_enum { idle, active, error };
+   state_enum _state = idle;
+
+   void draw(context const& ctx) override
+   {
+      auto& cnv = ctx.canvas;
+      auto& thm = get_theme();
+      color c;
+      switch (_state)
+      {
+         case active: c = thm.indicator_color.opacity(0.35); break;
+         case error:  c = colors::red.opacity(0.35); break;
+         default:     c = thm.window_background_color; break;
+      }
+      cnv.fill_style(c);
+      cnv.fill_rect(ctx.bounds);
+   }
+};
+
+auto background = themed_background{};
 
 auto make_range_slider(view& _view, auto _range_slider, std::string _title, std::string _subtitle)
 {
    auto _min_textbox = share(input_box("min level"));
    auto _max_textbox = share(input_box("max level"));
-   auto _min_bg = share(box(bg_color));
-   auto _max_bg = share(box(bg_color));
+   auto _min_bg = share(input_box_bg{});
+   auto _max_bg = share(input_box_bg{});
 
    auto pretty_printer =
       [] (float value)
@@ -60,11 +92,8 @@ auto make_range_slider(view& _view, auto _range_slider, std::string _title, std:
    _min_textbox->second->on_text =
       [_min_bg] (std::string_view text)
       {
-         if (text.empty()) {
-            *_min_bg = bg_color;
-         } else {
-            *_min_bg = bg_color_accent;
-         }
+         _min_bg->_state = text.empty()?
+            input_box_bg::idle : input_box_bg::active;
       };
 
    _min_textbox->second->on_enter =
@@ -73,12 +102,12 @@ auto make_range_slider(view& _view, auto _range_slider, std::string _title, std:
          try
          {
             _range_slider->value_first(axis_transform_inv(std::stof(std::string(text))));
-            *_min_bg = bg_color;
+            _min_bg->_state = input_box_bg::idle;
             _view.refresh(*_range_slider);
          }
          catch (std::exception&)
          {
-            *_min_bg = bred;
+            _min_bg->_state = input_box_bg::error;
          }
          _view.refresh(*_min_bg);
          return true;
@@ -87,10 +116,8 @@ auto make_range_slider(view& _view, auto _range_slider, std::string _title, std:
    _max_textbox->second->on_text =
       [_max_bg] (std::string_view text)
       {
-         if (text.empty())
-            *_max_bg = bg_color;
-         else
-            *_max_bg = bg_color_accent;
+         _max_bg->_state = text.empty()?
+            input_box_bg::idle : input_box_bg::active;
       };
 
    _max_textbox->second->on_enter =
@@ -99,12 +126,12 @@ auto make_range_slider(view& _view, auto _range_slider, std::string _title, std:
          try
          {
             _range_slider->value_second(axis_transform_inv(std::stof(std::string(text))));
-            *_max_bg = bg_color;
+            _max_bg->_state = input_box_bg::idle;
             _view.refresh(*_range_slider);
          }
          catch (std::exception&)
          {
-            *_max_bg = bred;
+            _max_bg->_state = input_box_bg::error;
          }
          _view.refresh(*_max_bg);
          return true;
@@ -118,7 +145,7 @@ auto make_range_slider(view& _view, auto _range_slider, std::string _title, std:
                label(_title).font_size(18)
             ),
             align_center(
-               label(_subtitle).font_color(colors::light_yellow.opacity(0.6))
+               label(_subtitle)
             ),
             margin(
                {50, 10, 50, 0},
@@ -160,7 +187,7 @@ auto make_log_range_slider(view& _view)
 {
    double min_val = 1e-4;
    double max_val = 1e0;
-   auto track = basic_track<5, false>(colors::black);
+   auto track = basic_track<5, false>();
    auto _range_slider = share(range_slider(
       basic_thumb<20>(),
       basic_thumb<20>(),
@@ -176,8 +203,8 @@ auto make_log_range_slider(view& _view)
 
    auto _min_textbox = share(input_box("min level"));
    auto _max_textbox = share(input_box("max level"));
-   auto _min_bg = share(box(bg_color));
-   auto _max_bg = share(box(bg_color));
+   auto _min_bg = share(input_box_bg{});
+   auto _max_bg = share(input_box_bg{});
 
    auto pretty_printer =
       [] (float value)
@@ -219,11 +246,8 @@ auto make_log_range_slider(view& _view)
    _min_textbox->second->on_text =
       [_min_bg] (std::string_view text)
       {
-         if (text.empty()) {
-            *_min_bg = bg_color;
-         } else {
-            *_min_bg = bg_color_accent;
-         }
+         _min_bg->_state = text.empty()?
+            input_box_bg::idle : input_box_bg::active;
       };
 
    _min_textbox->second->on_enter =
@@ -231,10 +255,10 @@ auto make_log_range_slider(view& _view)
       {
          try {
             _range_slider->value_first(axis_transform_inv(std::stof(std::string(text))));
-            *_min_bg = bg_color;
+            _min_bg->_state = input_box_bg::idle;
             _view.refresh(*_range_slider);
          } catch (std::exception&) {
-            *_min_bg = bred;
+            _min_bg->_state = input_box_bg::error;
          }
          _view.refresh(*_min_bg);
          return true;
@@ -243,11 +267,8 @@ auto make_log_range_slider(view& _view)
    _max_textbox->second->on_text =
       [_max_bg] (std::string_view text)
       {
-         if (text.empty()) {
-            *_max_bg = bg_color;
-         } else {
-            *_max_bg = bg_color_accent;
-         }
+         _max_bg->_state = text.empty()?
+            input_box_bg::idle : input_box_bg::active;
       };
 
    _max_textbox->second->on_enter =
@@ -255,10 +276,10 @@ auto make_log_range_slider(view& _view)
       {
          try {
             _range_slider->value_second(axis_transform_inv(std::stof(std::string(text))));
-            *_max_bg = bg_color;
+            _max_bg->_state = input_box_bg::idle;
             _view.refresh(*_range_slider);
          } catch (std::exception&) {
-            *_max_bg = bred;
+            _max_bg->_state = input_box_bg::error;
          }
          _view.refresh(*_max_bg);
          return true;
@@ -272,7 +293,7 @@ auto make_log_range_slider(view& _view)
                label("Logarithmic range slider").font_size(18)
             ),
             align_center(
-               label("Overlapping thumbs.").font_color(colors::light_yellow.opacity(0.6))
+               label("Overlapping thumbs.")
             ),
             margin(
                {50, 10, 50, 0},
@@ -312,7 +333,7 @@ auto make_log_range_slider(view& _view)
 
 auto make_default_range_slider(view& _view)
 {
-   auto track = basic_track<5, false>(colors::black);
+   auto track = basic_track<5, false>();
    auto _range_slider = share(range_slider(
       fixed_size(
          {8, 27},
@@ -335,7 +356,7 @@ auto make_default_range_slider(view& _view)
 
 auto make_overlapping_range_slider(view& _view)
 {
-   auto track = basic_track<5, false>(colors::black);
+   auto track = basic_track<5, false>();
    auto _range_slider = share(range_slider(
       fixed_size(
          {8, 27},
@@ -365,7 +386,7 @@ auto make_tip_box()
          label(
             "Tip: Take a look at the Model example to see how "
             "to add validation logic to the input boxes."
-         ).font_color(colors::light_yellow.opacity(0.6))
+         )
       )
    );
 }

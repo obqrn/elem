@@ -62,7 +62,7 @@ namespace cycfi::elements
          if (!control || e.wants_control())
          {
             rect bounds = bounds_of(ctx, ix);
-            if (bounds.includes(p))
+            if (bounds.includes(p) || e.floating_content())
             {
                context ectx{ctx, &e, bounds};
                if (auto leaf = e.hit_test(ectx, p, true, control))
@@ -139,7 +139,7 @@ namespace cycfi::elements
       if (!control || e.wants_control())
       {
          rect bounds = bounds_of(ctx, _selected_index);
-         if (bounds.includes(p))
+         if (bounds.includes(p) || e.floating_content())
          {
             context ectx{ctx, &e, bounds};
             if (auto leaf = e.hit_test(ectx, p, true, control))
@@ -164,5 +164,12 @@ namespace cycfi::elements
    {
       if (index < size())
          _selected_index = index;
+   }
+
+   bool deck_element::floating_content() const
+   {
+      if (empty())
+         return false;
+      return at(_selected_index).floating_content();
    }
 }

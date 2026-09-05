@@ -13,6 +13,8 @@
 #include <vector>
 #include <array>
 #include <set>
+#include <algorithm>
+#include <iterator>
 
 namespace cycfi::elements
 {
@@ -35,6 +37,9 @@ namespace cycfi::elements
       virtual std::size_t     size() const = 0;
       bool                    empty() const { return size() == 0; }
       virtual element&        at(std::size_t ix) const = 0;
+
+      virtual bool            move_to_front(element_ptr) { return false; }
+      virtual bool            erase_element(element_ptr) { return false; }
    };
 
    // Forward declaration
@@ -54,6 +59,7 @@ namespace cycfi::elements
 
       view_limits             limits(basic_context const& ctx) const override = 0;
       element*                hit_test(context const& ctx, point p, bool leaf, bool control) override;
+      bool                    floating_content() const override;
       void                    draw(context const& ctx) override;
       void                    layout(context const& ctx) override = 0;
       void                    refresh(context const& ctx, element& element, int outward = 0) override;
@@ -165,6 +171,9 @@ namespace cycfi::elements
       std::size_t             size() const override;
       element&                at(std::size_t ix) const override;
 
+      bool                    move_to_front(element_ptr e) override;
+      bool                    erase_element(element_ptr e) override;
+
       using Container::empty;
    };
 
@@ -273,6 +282,48 @@ namespace cycfi::elements
    inline element& composite<Container, Base>::at(std::size_t ix) const
    {
       return *(*this)[ix].get();
+   }
+
+   /**
+    * \brief
+    *    Moves the given element to the front (end) of the container,
+    *    preserving the relative order of the other elements.
+    *
+    *    Returns true if the element was found and moved; false if it was
+    *    not found or was already at the front.
+    */
+   template <concepts::Container Container, concepts::Composite Base>
+   inline bool composite<Container, Base>::move_to_front(element_ptr e)
+   {
+      auto i = std::find(this->begin(), this->end(), e);
+      if (i == this->end() || std::next(i) == this->end())
+         return false;
+      std::rotate(i, std::next(i), this->end());
+      return true;
+   }
+
+   /**
+    * \brief
+    *    Erases the given element from the container if the container
+    *    supports erasure (e.g. std::vector). Fixed-size containers (e.g.
+    *    std::array) do not support erasure and return false.
+    */
+   template <concepts::Container Container, concepts::Composite Base>
+   inline bool composite<Container, Base>::erase_element(element_ptr e)
+   {
+      if constexpr (requires(Container c, typename Container::iterator i)
+      {
+         c.erase(i);
+      })
+      {
+         auto i = std::find(this->begin(), this->end(), e);
+         if (i != this->end())
+         {
+            this->erase(i);
+            return true;
+         }
+      }
+      return false;
    }
 
    /**

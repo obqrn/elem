@@ -33,6 +33,11 @@ namespace cycfi::elements
       return r;
    }
 
+   bool proxy_base::floating_content() const
+   {
+      return subject().floating_content();
+   }
+
    void proxy_base::draw(context const& ctx)
    {
       context sctx {ctx, &subject(), ctx.bounds};

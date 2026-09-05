@@ -46,6 +46,7 @@ namespace cycfi::elements
       view_stretch            stretch() const override;
       unsigned                span() const override;
       element*                hit_test(context const& ctx, point p, bool leaf, bool control) override;
+      bool                    floating_content() const override;
       void                    draw(context const& ctx) override;
       void                    layout(context const& ctx) override;
       void                    refresh(context const& ctx, element& element, int outward = 0) override;

@@ -90,6 +90,7 @@ namespace cycfi::elements
       void                 refresh(context const& ctx, element& element, int outward = 0) override;
       void                 in_context_do(context const& ctx, element& e, context_function f) override;
       hit_info             hit_element(context const& ctx, point p, bool control) const override;
+      bool                 floating_content() const override;
       void                 begin_focus(focus_request req) override;
 
       using element::refresh;

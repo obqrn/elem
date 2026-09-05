@@ -26,6 +26,7 @@ namespace cycfi::elements
                               {}
 
       view_limits             limits(basic_context const& ctx) const override;
+      bool                    floating_content() const override;
       void                    prepare_subject(context& ctx) override;
 
       rect                    bounds() const;

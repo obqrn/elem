@@ -14,6 +14,11 @@ namespace cycfi::elements
       return {{e_limits.min.x, e_limits.min.y}, {full_extent, full_extent}};
    }
 
+   bool floating_element::floating_content() const
+   {
+      return true;
+   }
+
    void floating_element::prepare_subject(context& ctx)
    {
       ctx.bounds = this->bounds();

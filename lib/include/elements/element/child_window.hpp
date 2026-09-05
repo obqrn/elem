@@ -13,6 +13,9 @@
 
 namespace cycfi::elements
 {
+   class view;
+   class composite_base;
+
    /**
     * \class child_window_element
     *
@@ -28,7 +31,9 @@ namespace cycfi::elements
 
       using floating_element::floating_element;
 
+      element*             hit_test(context const& ctx, point p, bool leaf, bool control) override;
       bool                 click(context const& ctx, mouse_button btn) override;
+      bool                 wants_control() const override;
    };
 
    /**
@@ -192,7 +197,11 @@ namespace cycfi::elements
       return {std::forward<Subject>(subject)};
    }
 
-   void close_floating_element(context& ctx, floating_element* cw);
+   void close_floating_element(
+      view& view_, floating_element* cw, composite_base* parent
+   );
+
+   composite_base* nested_parent_composite(context const& ctx);
 
    template <concepts::Element Subject>
    inline void closable_element<Subject>::prepare_subject(context& ctx)
@@ -200,13 +209,21 @@ namespace cycfi::elements
       auto btn = find_subject<basic_button*>(this);
       if (btn)
       {
-         btn->on_click =
-            [&ctx](bool)
-            {
-               auto fl = find_parent<floating_element*>(ctx);
-               if (fl)
-                  close_floating_element(ctx, fl);
-            };
+         auto fl = find_parent<floating_element*>(ctx);
+         if (fl)
+         {
+            // Resolve the enclosing floating element and its parent
+            // composite while the context chain is still valid.
+            // on_click fires later (on mouse-up), by which time the
+            // layout-time context stack is gone, so capture only
+            // long-lived pointers.
+            auto parent = nested_parent_composite(ctx);
+            btn->on_click =
+               [fl, parent, &view = ctx.view](bool)
+               {
+                  close_floating_element(view, fl, parent);
+               };
+         }
       }
    }
 
@@ -227,21 +244,29 @@ namespace cycfi::elements
       return {std::forward<Subject>(subject)};
    }
 
-   void minimize_floating_element(context& ctx, floating_element* cw);
-
    template <concepts::Element Subject>
    inline void minimizable_element<Subject>::prepare_subject(context& ctx)
    {
       auto btn = find_subject<basic_button*>(this);
       if (btn)
       {
-         btn->on_click =
-            [&ctx](bool)
-            {
-               auto fl = find_parent<floating_element*>(ctx);
-               if (fl)
-                  minimize_floating_element(ctx, fl);
-            };
+         auto fl = find_parent<floating_element*>(ctx);
+         if (fl)
+         {
+            // Resolve the minimum size while the context chain is still
+            // valid. on_click fires later (on mouse-up), by which time
+            // the layout-time context stack is gone, so capture only
+            // long-lived pointers and plain values.
+            auto min = fl->subject().limits(ctx).min;
+            btn->on_click =
+               [fl, min](bool)
+               {
+                  auto bounds = fl->bounds();
+                  bounds.width(min.x);
+                  bounds.height(min.y);
+                  fl->bounds(bounds);
+               };
+         }
       }
    }
 
@@ -262,21 +287,29 @@ namespace cycfi::elements
       return {std::forward<Subject>(subject)};
    }
 
-   void maximize_floating_element(context& ctx, floating_element* cw);
-
    template <concepts::Element Subject>
    inline void maximizable_element<Subject>::prepare_subject(context& ctx)
    {
       auto btn = find_subject<basic_button*>(this);
       if (btn)
       {
-         btn->on_click =
-            [&ctx](bool)
-            {
-               auto fl = find_parent<floating_element*>(ctx);
-               if (fl)
-                  maximize_floating_element(ctx, fl);
-            };
+         auto fl = find_parent<floating_element*>(ctx);
+         if (fl)
+         {
+            // Resolve the maximum size while the context chain is still
+            // valid. on_click fires later (on mouse-up), by which time
+            // the layout-time context stack is gone, so capture only
+            // long-lived pointers and plain values.
+            auto max = fl->subject().limits(ctx).max;
+            btn->on_click =
+               [fl, max](bool)
+               {
+                  auto bounds = fl->bounds();
+                  bounds.width(max.x);
+                  bounds.height(max.y);
+                  fl->bounds(bounds);
+               };
+         }
       }
    }
 }

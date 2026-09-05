@@ -653,7 +653,7 @@ namespace cycfi::elements
          {
             if (!control || e.wants_control())
             {
-               if (bounds.includes(p))
+               if (bounds.includes(p) || e.floating_content())
                {
                   context ectx{ctx, &e, bounds};
                   if (auto leaf = e.hit_test(ectx, p, true, control))
@@ -665,9 +665,17 @@ namespace cycfi::elements
             }
             return false;
          },
-         reverse_index()
+         true
       );
       return info;
+   }
+
+   bool composite_base::floating_content() const
+   {
+      for (std::size_t ix = 0; ix < size(); ++ix)
+         if (at(ix).floating_content())
+            return true;
+      return false;
    }
 
    /**

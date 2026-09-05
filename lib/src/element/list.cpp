@@ -221,8 +221,11 @@ namespace cycfi::elements
             }
          );
 
-         do
+         // upper_bound points one past the last cell that can possibly
+         // intersect the port; walk backwards from there.
+         while (it != _cells.begin())
          {
+            --it;
             auto& cell = *it;
             rect bounds = ctx.bounds;
             set_bounds(bounds, main_axis_start, cell);
@@ -233,10 +236,7 @@ namespace cycfi::elements
             }
             if (main_axis_port_start > get_main_axis_end(bounds))
                break;
-
-            ++it;
          }
-         while (it != _cells.begin());
       }
       else
       {

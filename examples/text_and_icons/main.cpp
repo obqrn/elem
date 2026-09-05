@@ -174,7 +174,6 @@ auto make_basic_text(view& view_)
          vtile(
             make_label(label("Hello, Universe. This is Elements.")
                .font(font_descr{"Open Sans"}.semi_bold())
-               .font_color(colors::antique_white)
                .font_size(18)
             ),
             make_label(

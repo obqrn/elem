@@ -197,7 +197,7 @@ namespace cycfi::elements
       // Draw linear lines
       draw_slider_marks(
          ctx.canvas, ctx.bounds, _size, _num_divs
-       , _major_divs, colors::light_gray);
+       , _major_divs, get_theme().ticks_color);
 
       // Draw the subject
       base_type::draw(ctx);
@@ -243,7 +243,7 @@ namespace cycfi::elements
       // Draw linear lines
       draw_slider_marks_lin(
          ctx.canvas, ctx.bounds, _size, _major_divs
-       , _minor_divs, colors::light_gray);
+       , _minor_divs, get_theme().ticks_color);
 
       // Draw the subject
       base_type::draw(ctx);
@@ -288,7 +288,7 @@ namespace cycfi::elements
       // Draw logarithmic lines
       draw_slider_marks_log(
          ctx.canvas, ctx.bounds, _size, _major_divs
-         , _minor_divs, colors::light_gray);
+         , _minor_divs, get_theme().ticks_color);
 
       // Draw the subject
       base_type::draw(ctx);
