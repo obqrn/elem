@@ -1,0 +1,89 @@
+= Rich Text
+
+include::../common.adoc[]
+
+== Overview
+
+Rich text is a sequence of text spans, where each span carries its own
+text, font (family, size, weight and slant) and color. Unlike
+xref:../layout.adoc[labels], which render a single style, rich text mixes
+styles on one line, wraps lines across span boundaries, and shares a common
+baseline between spans of different font sizes.
+
+Rich text is read-only. It provides the layout core for the styled text
+pipeline; interactive editing builds on top of it in later stages.
+
+== text_span
+
+The building block of rich text:
+
+[source,cpp]
+----
+struct text_span
+{
+   std::string  text;
+   font_descr   font_;
+   color        color_;
+};
+----
+
+`font_`:: The span font as a `font_descr`. Derive variants with the fluent
+members, for example `.bold()`, `.italic()`, `.size(16)`.
+
+`color_`:: The text color.
+
+== rich_text
+
+Creates a read-only rich text element:
+
+[source,cpp]
+----
+rich_text(std::vector<text_span> spans, float width, int align)
+----
+
+`spans`:: The styled text, in display order.
+
+`width`:: The wrapping constraint. Pass `full_extent` for a single,
+unwrapped line.
+
+`align`:: Follows the canvas text alignment semantics. Horizontal:
+`canvas::left`, `canvas::center`, `canvas::right`; vertical:
+top, middle, bottom (combine with `|`).
+
+[source,cpp]
+----
+rich_text({
+   text_span{"Mixed ", base, colors::black},
+   text_span{"bold", base.bold(), blue},
+   text_span{" text", base.italic(), red},
+}, 200);
+----
+
+== Line wrapping rules
+
+The wrapping engine is greedy and word based:
+
+* Words are broken at whitespace boundaries. A word wider than the line is
+  hard-broken character by character (UTF-8 aware).
+* A hard newline ends the line immediately.
+* Spaces pending at a line end are dropped; wrapped lines never start with
+  a space.
+* Spaces at the end of a span still join the next span's first word.
+* The line height is the max of the span font heights; spans on a line
+  share a common baseline equal to the line's max ascent.
+
+== rich_text_layout
+
+The layout engine behind the element, available for standalone use
+(measurement, custom drawing):
+
+[source,cpp]
+----
+rich_text_layout layout(std::vector<text_span> spans);
+layout.layout(200);                    // wrap at 200 px
+layout.draw(cnv, pos, canvas::left);   // draw at pos
+auto s = layout.size();                // resulting extent
+----
+
+All measurement and drawing go through the canvas abstraction
+(`measure_text` / `fill_text`); no backend-specific types are exposed.

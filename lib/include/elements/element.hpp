@@ -30,6 +30,7 @@
 #include <elements/element/port.hpp>
 #include <elements/element/proxy.hpp>
 #include <elements/element/range_slider.hpp>
+#include <elements/element/rich_text.hpp>
 #include <elements/element/size.hpp>
 #include <elements/element/slider.hpp>
 #include <elements/element/status_bar.hpp>
