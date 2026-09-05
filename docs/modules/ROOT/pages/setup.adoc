@@ -308,6 +308,32 @@ member.
 The `sampler` example has a Theme toggle button that demonstrates runtime
 switching between the dark and light themes.
 
+== Visual style (WinUI/Fluent)
+
+On top of the color schemes, Elements supports an alternative control
+skin, `ui_style_enum::winui_style`, that draws flat Fluent/WinUI-like
+controls. The style is orthogonal to the color scheme, so all four
+combinations (dark/light x default/winui) are available:
+
+[,c++]
+----
+set_theme(make_winui_theme());        // dark WinUI/Fluent style
+set_theme(make_winui_theme(false));   // light WinUI/Fluent style
+----
+
+A `winui_style` theme draws:
+
+. Buttons: flat solid fill, no gradient, thin border on hover/pressed
+. Toggle switches: pill track with an accent fill when on, a smaller
+  knob that swells as it slides
+. Check boxes: rounded accent square with a white check mark
+. Sliders: flat thin track and thumb
+
+`make_winui_theme` derives its fonts and colors from the corresponding
+base scheme, so switching styles preserves your color choices. The
+`sampler` example has a WinUI Style toggle button that demonstrates
+runtime switching between the default and WinUI styles.
+
 == Building Outside the Project
 
 The Elements project is set up so that you can easily copy and paste any of the examples outside the project, set -DELEMENTS_ROOT="path/to/elements", and the example should immediately build without any hassle.
