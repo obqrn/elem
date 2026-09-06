@@ -4,6 +4,8 @@
    Distributed under the MIT License [ https://opensource.org/licenses/MIT ]
 =============================================================================*/
 #include <elements.hpp>
+#include <elements/support/detail/scratch_context.hpp>
+#include <cmath>
 #include <cstdio>
 
 using namespace cycfi::elements;
@@ -32,6 +34,10 @@ namespace
    {
       auto theme_ = get_theme();
       auto base = theme_.label_font.size(12);
+
+      // A scratch canvas for independent measurement of expected values.
+      detail::scratch_context sctx;
+      canvas cnv{*sctx.context()};
 
       // 1. Empty layout
       {
@@ -167,6 +173,147 @@ namespace
                all_fit = false;
          CHECK(all_fit, "CJK text wraps within the width");
          CHECK(lt.lines().size() >= 2, "CJK text produces multiple lines");
+      }
+
+      // 11. Space before a newline is dropped; the newline byte must never
+      //     appear in a segment
+      {
+         rich_text_layout lt({text_span{"a \nb", base, colors::black}});
+         lt.layout(full_extent);
+         CHECK(lt.lines().size() == 2, "newline after space still wraps");
+         bool clean = true;
+         for (auto const& l : lt.lines())
+            for (auto const& seg : l.segments)
+            {
+               auto const& t = lt.spans()[seg.span].text;
+               for (std::size_t k = seg.first; k != seg.last; ++k)
+                  if (t[k] == '\n')
+                     clean = false;
+               if (seg.x == 0 && t[seg.first] == ' ')
+                  clean = false;
+            }
+         CHECK(clean, "no newline byte or leading space leaks into lines");
+      }
+
+      // 12. Consecutive newlines produce an explicit empty line
+      {
+         rich_text_layout lt({text_span{"a\n\nb", base, colors::black}});
+         lt.layout(full_extent);
+         CHECK(lt.lines().size() == 3, "blank line preserved");
+         CHECK(lt.lines()[1].segments.empty() && lt.lines()[1].width == 0,
+            "blank line has no segments");
+         CHECK(lt.lines()[1].ascent > 0, "blank line has the span height");
+      }
+
+      // 13. Multi-space runs are measured at their full width
+      {
+         rich_text_layout lt({text_span{
+            "aaaa  bbbb cccc", base, colors::black}});
+         lt.layout(40);
+         bool all_fit = true;
+         for (auto const& l : lt.lines())
+            if (l.width > 40.001f)
+               all_fit = false;
+         CHECK(all_fit, "double-space runs respect the width");
+      }
+
+      // 14. Spaces after a hard newline are preserved (markdown indented
+      //     code block semantics)
+      {
+         rich_text_layout lt({text_span{"a\n  b", base, colors::black}});
+         lt.layout(full_extent);
+         CHECK(lt.lines().size() == 2, "text after newline on its own line");
+         bool leading_space_present = false;
+         for (auto const& seg : lt.lines()[1].segments)
+         {
+            auto const& t = lt.spans()[seg.span].text;
+            if (seg.x == 0 && t[seg.first] == ' ')
+               leading_space_present = true;
+         }
+         CHECK(leading_space_present, "spaces after newline are preserved");
+      }
+
+      // 15. Cross-span space runs: every span contributes its own segment
+      //     and the full run width is accounted for
+      {
+         rich_text_layout lt({
+            text_span{"a ", base, colors::black},
+            text_span{"  b", base, colors::black}});
+         lt.layout(full_extent);
+         CHECK(lt.lines().size() == 1, "all on one line");
+         // segments: a, space, space, b
+         CHECK(lt.lines()[0].segments.size() == 4,
+            "each span's spaces become their own segments");
+         // total width = a + 3 spaces + b, measured segment by segment
+         // (per-segment shaping has no cross-segment kerning)
+         auto expected =
+            measure_text(cnv, "a", base).x +
+            measure_text(cnv, " ", base).x +
+            measure_text(cnv, " ", base).x +
+            measure_text(cnv, " ", base).x +
+            measure_text(cnv, "b", base).x;
+         CHECK(std::abs(lt.lines()[0].width - expected) < 0.5f,
+            "full space run width accounted for");
+      }
+
+      // 16. Mixed font sizes with a cross-span space: the space is measured
+      //     in its own span's font
+      {
+         rich_text_layout lt({
+            text_span{"big ", base.size(24), colors::black},
+            text_span{" b", base.size(12), colors::black}});
+         lt.layout(full_extent);
+         CHECK(lt.lines().size() == 1, "mixed sizes on one line");
+         // Expected: big("big") + big(" ") + small(" ") + small("b")
+         auto big_f = base.size(24);
+         auto small_f = base.size(12);
+         auto expected =
+            measure_text(cnv, "big", big_f).x +
+            measure_text(cnv, " ", big_f).x +
+            measure_text(cnv, " ", small_f).x +
+            measure_text(cnv, "b", small_f).x;
+         CHECK(std::abs(lt.lines()[0].width - expected) < 0.5f,
+            "cross-span space measured in its own font");
+      }
+
+      // 17. A truncated UTF-8 sequence: the valid prefix is laid out, the
+      //     malformed tail is dropped, and later layouts keep measuring
+      //     correctly (the malformed bytes must never reach cairo)
+      {
+         rich_text_layout lt({text_span{
+            std::string("ab\xE4\xB8", 4), base, colors::black}});
+         lt.layout(40);
+         CHECK(lt.lines().size() >= 1, "truncated utf8 does not crash");
+         bool ranges_ok = true;
+         for (auto const& l : lt.lines())
+            for (auto const& seg : l.segments)
+               if (seg.first > seg.last ||
+                   seg.last > lt.spans()[seg.span].text.size())
+                  ranges_ok = false;
+         CHECK(ranges_ok, "truncated utf8 byte ranges stay in bounds");
+         // The valid prefix "ab" must still be laid out with its real width.
+         CHECK(lt.lines()[0].width > 0, "valid prefix still measured");
+      }
+
+      // 18. A character wider than the line is placed anyway (no hang)
+      {
+         rich_text_layout lt({text_span{
+            "wide", base.size(24), colors::black}});
+         lt.layout(1);
+         CHECK(lt.lines().size() == 4, "every character lands on its own line");
+      }
+
+      // 19. Four-byte emoji survives a hard break without splitting
+      //     a code point
+      {
+         rich_text_layout lt({text_span{
+            "\xF0\x9F\x98\x80x", base, colors::black}});
+         lt.layout(12);
+         bool all_fit = true;
+         for (auto const& l : lt.lines())
+            if (l.width > 12.001f)
+               all_fit = false;
+         CHECK(all_fit, "emoji hard break respects the width");
       }
 
       printf("%s\n", failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED");

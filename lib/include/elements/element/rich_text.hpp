@@ -29,7 +29,7 @@ namespace cycfi::elements
    {
       std::string  text;
       font_descr   font_;
-      color        color_;
+      color        color_ = colors::black;
    };
 
    /**
@@ -46,11 +46,20 @@ namespace cycfi::elements
     *    behavior):
     *       - Words are broken at whitespace boundaries. A word that is
     *         wider than the line is hard-broken character by character.
-    *       - A hard newline ends the line immediately.
-    *       - Spaces pending at a line end are discarded (leading spaces on
-    *         the next line are stripped).
+    *       - A hard newline ends the line immediately; consecutive
+    *         newlines produce empty lines. Spaces after a hard newline are
+    *         preserved (they are significant in markdown, e.g. indented
+    *         code blocks).
+    *       - Spaces pending at a wrap-induced line end are dropped
+    *         (wrapped lines never start with a space).
     *       - Line height is the max of the span font heights; spans share
     *         a common baseline equal to the max ascent of the line.
+    *
+    *    An empty line gets its height from the current span's font
+    *    metrics.
+    *
+    *    A single character wider than the line is placed anyway (the line
+    *    may exceed the width); this avoids an infinite loop.
     */
    class rich_text_layout
    {

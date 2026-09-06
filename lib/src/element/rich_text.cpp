@@ -13,11 +13,6 @@
 
 namespace cycfi::elements
 {
-   namespace
-   {
-      detail::scratch_context scratch_context_;
-   }
-
    void rich_text_layout::layout(float width)
    {
       CYCFI_ASSERT(width > 0 || width == full_extent,
@@ -30,16 +25,18 @@ namespace cycfi::elements
          return;
       }
 
-      canvas cnv{*scratch_context_.context()};
+      // A fresh scratch context per layout call: a malformed byte sequence
+      // (truncated UTF-8) can poison a cairo context with a sticky error
+      // status, so sharing a context across calls would silently zero out
+      // all later measurements.
+      detail::scratch_context scratch;
+      canvas cnv{*scratch.context()};
 
-      // Pre-compute per-span metrics: text width is measured on demand,
-      // but the font metrics are needed per span for line height and the
-      // baseline.
+      // Per-span font metrics, needed for line height and the baseline.
       struct span_metrics
       {
          float  ascent;
          float  descent;
-         float  space_w;
       };
       std::vector<span_metrics> metrics;
       metrics.reserve(_spans.size());
@@ -47,7 +44,7 @@ namespace cycfi::elements
       {
          cnv.font(span.font_, span.font_._size);
          auto fm = cnv.measure_font();
-         metrics.push_back({fm.ascent, fm.descent, cnv.measure_text(" ").size.x});
+         metrics.push_back({fm.ascent, fm.descent});
       }
 
       line current;
@@ -68,52 +65,69 @@ namespace cycfi::elements
          x = 0;
       };
 
+      // Measure a byte range of a span using that span's own font. Uses the
+      // string_view overload so no temporary std::string is constructed.
+      auto measure_span_text = [&](std::size_t si, std::size_t first,
+         std::size_t last) -> float
+      {
+         return measure_text(cnv,
+            std::string_view(_spans[si].text.data() + first, last - first),
+            _spans[si].font_).x;
+      };
+
       // Append a segment for span `si` covering bytes [first, last) at the
-      // current horizontal position, advancing the cursor.
-      auto put_segment = [&](std::size_t si, std::size_t first, std::size_t last)
+      // current horizontal position, advancing the cursor by the given
+      // (already measured) width.
+      auto put_segment = [&](std::size_t si, std::size_t first,
+         std::size_t last, float w)
       {
          if (first == last)
             return;
          current.segments.push_back({si, first, last, x});
          current.ascent = std::max(current.ascent, metrics[si].ascent);
          current.descent = std::max(current.descent, metrics[si].descent);
-         x += cnv.measure_text(std::string(
-            _spans[si].text.data() + first, _spans[si].text.data() + last).c_str()).size.x;
+         x += w;
       };
+
+      // Pending whitespace: a run of space characters, tracked as one entry
+      // per span it crosses. Each entry carries its own measured width
+      // (measured in the font of the span it belongs to).
+      struct space_seg
+      {
+         std::size_t  si;
+         std::size_t  first;
+         std::size_t  last;
+         float        w;
+      };
+      std::vector<space_seg> pending_spaces;
 
       // Place a word from span `si`, bytes [first, last). The word is put on
       // the current line when it fits (carrying its pending leading spaces);
       // if the word fits a full line but not the remainder of the current
-      // one, the line ends first. An over-wide word is hard-broken character
-      // by character.
-      auto place_word = [&](std::size_t si, std::size_t first, std::size_t last,
-         std::size_t space_span_, std::size_t space_start, bool pending_space)
+      // one, the line ends first and the pending spaces are dropped. An
+      // over-wide word is hard-broken character by character.
+      auto place_word = [&](std::size_t si, std::size_t first, std::size_t last)
       {
-         auto word = std::string(
-            _spans[si].text.data() + first, _spans[si].text.data() + last);
-         float w = cnv.measure_text(word.c_str()).size.x;
-         float space = pending_space ? metrics[space_span_].space_w : 0;
+         float w = measure_span_text(si, first, last);
+         float space = 0;
+         for (auto const& sg : pending_spaces)
+            space += sg.w;
 
          if (x + space + w <= width)
          {
             // Fits on the current line, including pending leading spaces.
-            // A space run inside the same span ends where the word begins;
-            // one that survives a span boundary runs to the end of its own
-            // span's text.
-            if (pending_space)
-            {
-               std::size_t space_end = (space_span_ == si)
-                  ? first : _spans[space_span_].text.size();
-               put_segment(space_span_, space_start, space_end);
-            }
-            put_segment(si, first, last);
+            for (auto const& sg : pending_spaces)
+               put_segment(sg.si, sg.first, sg.last, sg.w);
+            pending_spaces.clear();
+            put_segment(si, first, last, w);
          }
          else if (w <= width)
          {
             // The word does not fit the remainder: end the line, strip
             // pending spaces.
             end_line();
-            put_segment(si, first, last);
+            pending_spaces.clear();
+            put_segment(si, first, last, w);
          }
          else
          {
@@ -121,6 +135,7 @@ namespace cycfi::elements
             // character by character (UTF-8 aware).
             if (!current.segments.empty())
                end_line();
+            pending_spaces.clear();
 
             auto const& text = _spans[si].text;
             std::size_t pos = first;
@@ -132,14 +147,19 @@ namespace cycfi::elements
                do
                {
                   state = decode_utf8(state, cp, uint8_t(text[i++]));
-               } while (state != 0);
+               } while (state != 0 && i < last);
+
+               // A truncated sequence ends the loop with a non-zero
+               // decoder state. Drop the malformed tail: passing it to
+               // cairo would poison the context with a sticky error.
+               if (state != 0)
+                  break;
 
                // `i` is the byte after the current character [pos, i)
-               float cw = cnv.measure_text(std::string(
-                  text.data() + pos, text.data() + i).c_str()).size.x;
+               float cw = measure_span_text(si, pos, i);
                if (x > 0 && x + cw > width)
                   end_line();
-               put_segment(si, pos, i);
+               put_segment(si, pos, i, cw);
                pos = i;
             }
          }
@@ -147,28 +167,21 @@ namespace cycfi::elements
 
       // Greedy token scan across all spans. Words are sequences of
       // non-whitespace characters; whitespace is kept pending and attached
-      // to the word that follows (and dropped at line ends). Pending spaces
-      // survive span boundaries: a trailing space of a span still joins the
-      // next span's word. A hard newline ends the line immediately.
-      std::size_t space_span = 0;
-      std::size_t space_start = 0;
-      bool pending_space = false;
-
+      // to the word that follows (and dropped at wrap-induced line ends).
+      // Pending spaces survive span boundaries; each span contributes its
+      // own whitespace segment. A hard newline ends the line immediately
+      // and drops pending spaces; spaces after the newline are preserved.
       for (std::size_t si = 0; si != _spans.size(); ++si)
       {
-         cnv.font(_spans[si].font_, _spans[si].font_._size);
          auto const& text = _spans[si].text;
-
          std::size_t word_start = text.size();
 
          auto flush_word = [&](std::size_t word_end)
          {
             if (word_start == text.size())
                return;
-            place_word(si, word_start, word_end, space_span, space_start,
-               pending_space);
+            place_word(si, word_start, word_end);
             word_start = text.size();
-            pending_space = false;
          };
 
          std::size_t pos = 0;
@@ -180,22 +193,48 @@ namespace cycfi::elements
             do
             {
                state = decode_utf8(state, cp, uint8_t(text[i++]));
-            } while (state != 0);
+            } while (state != 0 && i < text.size());
+
+            // Drop a truncated trailing sequence (see place_word above).
+            // Flush the word prefix first so the valid bytes still lay out.
+            if (state != 0)
+            {
+               flush_word(pos);
+               break;
+            }
 
             if (is_newline(cp))
             {
                flush_word(pos);
+               pending_spaces.clear();
+               if (current.segments.empty() && !_lines.empty())
+               {
+                  // An explicit empty line: consecutive newlines. Give it
+                  // the height of the current span's font.
+                  line blank;
+                  blank.ascent = metrics[si].ascent;
+                  blank.descent = metrics[si].descent;
+                  _lines.push_back(std::move(blank));
+               }
                end_line();
             }
             else if (is_space(cp))
             {
                flush_word(pos);
-               if (!pending_space)
+               if (!pending_spaces.empty() &&
+                   pending_spaces.back().si == si &&
+                   pending_spaces.back().last == pos)
                {
-                  space_span = si;
-                  space_start = pos;
+                  // Extend the whitespace run within the same span.
+                  auto& sg = pending_spaces.back();
+                  sg.last = i;
+                  sg.w += measure_span_text(si, pos, i);
                }
-               pending_space = true;
+               else
+               {
+                  pending_spaces.push_back(
+                     {si, pos, i, measure_span_text(si, pos, i)});
+               }
             }
             else if (word_start == text.size())
             {
