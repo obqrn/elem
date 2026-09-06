@@ -314,6 +314,39 @@ namespace
             if (l.width > 12.001f)
                all_fit = false;
          CHECK(all_fit, "emoji hard break respects the width");
+         CHECK(lt.lines().size() == 2, "emoji and x land on separate lines");
+         if (!lt.lines().empty() && !lt.lines()[0].segments.empty())
+         {
+            auto const& seg = lt.lines()[0].segments[0];
+            CHECK(seg.first == 0 && seg.last == 4,
+               "emoji occupies one unsplit segment [0,4)");
+         }
+      }
+
+      // 20. CRLF counts as a single newline (no phantom blank line)
+      {
+         rich_text_layout lt({text_span{
+            "a\r\nb", base, colors::black}});
+         lt.layout(full_extent);
+         CHECK(lt.lines().size() == 2, "CRLF produces two lines");
+         rich_text_layout lt2({text_span{
+            "a\r\n\r\nb", base, colors::black}});
+         lt2.layout(full_extent);
+         CHECK(lt2.lines().size() == 3, "CRLF CRLF produces one blank line");
+      }
+
+      // 21. An invalid byte in the middle resynchronizes: the text after
+      //     it is not discarded
+      {
+         rich_text_layout lt({text_span{
+            std::string("abc\xFF" "def", 7), base, colors::black}});
+         lt.layout(full_extent);
+         CHECK(lt.lines().size() == 1, "one line");
+         // The invalid byte is skipped; "abc" and "def" both survive.
+         std::size_t covered = 0;
+         for (auto const& seg : lt.lines()[0].segments)
+            covered += seg.last - seg.first;
+         CHECK(covered == 6, "all valid bytes are laid out (invalid skipped)");
       }
 
       printf("%s\n", failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED");

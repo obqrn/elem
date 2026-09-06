@@ -67,8 +67,9 @@ The wrapping engine is greedy and word based:
   hard-broken character by character (UTF-8 aware). A single character wider
   than the line is placed anyway (the line may exceed the width).
 * A hard newline ends the line immediately; consecutive newlines produce
-  explicit empty lines. Spaces after a hard newline are preserved (they are
-  significant in markdown, e.g. indented code blocks).
+  explicit empty lines. A leading newline produces no leading empty line.
+  CRLF counts as a single newline. Spaces after a hard newline are
+  preserved (they are significant in markdown, e.g. indented code blocks).
 * Spaces pending at a wrap-induced line end are dropped; wrapped lines never
   start with a space.
 * Spaces at the end of a span still join the next span's first word; each
@@ -76,7 +77,8 @@ The wrapping engine is greedy and word based:
 * The line height is the max of the span font heights; spans on a line
   share a common baseline equal to the line's max ascent.
 * A truncated UTF-8 sequence at the end of a span is dropped (the malformed
-  tail never reaches the backend).
+  tail never reaches the backend). An invalid byte elsewhere is skipped
+  and the decoder resynchronizes at the next byte.
 
 == rich_text_layout
 

@@ -65,8 +65,9 @@ namespace cycfi::elements
          x = 0;
       };
 
-      // Measure a byte range of a span using that span's own font. Uses the
-      // string_view overload so no temporary std::string is constructed.
+      // Measure a byte range of a span using that span's own font. The
+      // string_view overload sets the font internally (it still constructs
+      // a temporary for the backend call, but keeps the call sites clean).
       auto measure_span_text = [&](std::size_t si, std::size_t first,
          std::size_t last) -> float
       {
@@ -147,7 +148,17 @@ namespace cycfi::elements
                do
                {
                   state = decode_utf8(state, cp, uint8_t(text[i++]));
-               } while (state != 0 && i < last);
+               } while (state != 0 && state != utf8_reject && i < last);
+
+               if (state == utf8_reject)
+               {
+                  // An invalid byte: skip one byte and resynchronize the
+                  // decoder (a reject state is sticky).
+                  i = pos + 1;
+                  state = 0;
+                  pos = i;
+                  continue;
+               }
 
                // A truncated sequence ends the loop with a non-zero
                // decoder state. Drop the malformed tail: passing it to
@@ -187,13 +198,26 @@ namespace cycfi::elements
          std::size_t pos = 0;
          unsigned state = 0;
          unsigned cp = 0;
+         unsigned prev_cp = 0;
          while (pos < text.size())
          {
             std::size_t i = pos;
             do
             {
                state = decode_utf8(state, cp, uint8_t(text[i++]));
-            } while (state != 0 && i < text.size());
+            } while (state != 0 && state != utf8_reject && i < text.size());
+
+            if (state == utf8_reject)
+            {
+               // An invalid byte: flush the word prefix, then skip one byte
+               // and resynchronize the decoder (a reject state is sticky).
+               flush_word(pos);
+               i = pos + 1;
+               state = 0;
+               prev_cp = 0;
+               pos = i;
+               continue;
+            }
 
             // Drop a truncated trailing sequence (see place_word above).
             // Flush the word prefix first so the valid bytes still lay out.
@@ -205,18 +229,23 @@ namespace cycfi::elements
 
             if (is_newline(cp))
             {
-               flush_word(pos);
-               pending_spaces.clear();
-               if (current.segments.empty() && !_lines.empty())
+               if (!(cp == '\n' && prev_cp == '\r'))
                {
-                  // An explicit empty line: consecutive newlines. Give it
-                  // the height of the current span's font.
-                  line blank;
-                  blank.ascent = metrics[si].ascent;
-                  blank.descent = metrics[si].descent;
-                  _lines.push_back(std::move(blank));
+                  // A hard newline (CRLF counts once: the \r already ended
+                  // the line).
+                  flush_word(pos);
+                  pending_spaces.clear();
+                  if (current.segments.empty() && !_lines.empty())
+                  {
+                     // An explicit empty line: consecutive newlines. Give it
+                     // the height of the current span's font.
+                     line blank;
+                     blank.ascent = metrics[si].ascent;
+                     blank.descent = metrics[si].descent;
+                     _lines.push_back(std::move(blank));
+                  }
+                  end_line();
                }
-               end_line();
             }
             else if (is_space(cp))
             {
@@ -240,6 +269,7 @@ namespace cycfi::elements
             {
                word_start = pos;
             }
+            prev_cp = cp;
             pos = i;
          }
          flush_word(text.size());
