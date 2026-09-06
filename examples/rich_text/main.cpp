@@ -360,37 +360,44 @@ namespace
    {
       auto theme_ = get_theme();
       auto base = theme_.label_font.size(14);
-      auto black = colors::black;
-      auto blue = rgb(0x1565C0);
-      auto red = rgb(0xC62828);
+      // The default theme is dark: use the theme's foreground color
+      // instead of a hard-coded black. Accent colors are picked for
+      // contrast on dark surfaces.
+      auto fg = theme_.label_font_color;
+      auto blue = rgba(96, 205, 255, 255);
+      auto red = rgba(239, 154, 154, 255);
+      // CJK: Open Sans has no CJK glyphs. fontconfig falls back to an
+      // available CJK font, but for intended rendering pick one
+      // explicitly (Microsoft YaHei on Windows).
+      auto cjk = font_descr{"Microsoft YaHei", 16.0};
 
       return
          margin({20, 20, 20, 20},
             vtile(
                rich_text({text_span{
-                  "Rich Text Demo", base.size(24).bold(), black}}),
+                  "Rich Text Demo", base.size(24).bold(), fg}}),
                rich_text({text_span{
-                  "Mixed styles on one line: ", base, black},
+                  "Mixed styles on one line: ", base, fg},
                   {text_span{"bold", base.bold(), blue}},
-                  {text_span{" and ", base, black}},
+                  {text_span{" and ", base, fg}},
                   {text_span{"italic", base.italic(), red}},
-                  {text_span{" and ", base, black}},
-                  {text_span{"small caps", base.size(10), black}}}),
+                  {text_span{" and ", base, fg}},
+                  {text_span{"small caps", base.size(10), fg}}}),
                rich_text({text_span{
                   "Wrapped text: one two three four five six seven eight "
                   "nine ten eleven twelve thirteen fourteen fifteen",
-                  base, black}}, 200),
+                  base, fg}}, 200),
                rich_text({text_span{
-                  "right aligned", base.italic(), black}}, 200,
+                  "right aligned", base.italic(), fg}}, 200,
                   canvas::right),
                rich_text({text_span{
-                  "center aligned", base.bold(), black}}, 200,
+                  "center aligned", base.bold(), fg}}, 200,
                   canvas::center),
                rich_text({
-                  text_span{"中文 ", base.size(16), black},
-                  text_span{"加粗中文", base.size(16).bold(), blue},
+                  text_span{"中文 ", cjk, fg},
+                  text_span{"加粗中文", cjk.bold(), blue},
                   text_span{" 与英文 mixed together 自动换行测试文本内容示例",
-                     base.size(16), black}}, 200)
+                     cjk, fg}}, 200)
          )
       );
    }
