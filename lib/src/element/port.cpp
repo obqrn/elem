@@ -448,8 +448,14 @@ namespace cycfi::elements
             if (reposition(ctx, btn.pos))
                return true;
          }
-         _tracking = none;
-         refresh(ctx);
+         // Repaint only when a scrollbar interaction ends (the thumb
+         // highlight clears). A click anywhere else used to repaint the
+         // whole view on every down/up, the visible click flicker.
+         if (_tracking != none)
+         {
+            _tracking = none;
+            refresh(ctx);
+         }
       }
       return port_element::click(ctx, btn);
    }
@@ -573,13 +579,24 @@ namespace cycfi::elements
       if (has_scrollbars())
       {
          scrollbar_bounds sb = get_scrollbar_bounds(ctx);
-         if (sb.hscroll_bounds.includes(p) || sb.vscroll_bounds.includes(p))
+         bool over = sb.hscroll_bounds.includes(p) || sb.vscroll_bounds.includes(p);
+         if (over)
          {
-            ctx.view.refresh(ctx);
+            // Entering the scrollbar: repaint once for the hover highlight.
+            if (!_scrollbar_hover)
+               ctx.view.refresh(ctx);
+            _scrollbar_hover = true;
             set_cursor(cursor_type::arrow);
             return true;
          }
-         ctx.view.refresh(ctx);
+         // Leaving the scrollbar: repaint once to clear the highlight.
+         // (Previously every cursor event repainted the whole view, which
+         // flickered on entering/hovering even far away from the bars.)
+         if (_scrollbar_hover)
+         {
+            _scrollbar_hover = false;
+            ctx.view.refresh(ctx);
+         }
       }
       return port_element::cursor(ctx, p, status);
    }

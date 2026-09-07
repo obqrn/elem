@@ -46,6 +46,8 @@ set(ELEMENTS_SOURCES
    src/element/style/slider.cpp
    src/element/style/thumbwheel.cpp
    src/element/text.cpp
+   src/element/text_document.cpp
+   src/element/text_editor.cpp
    src/element/thumbwheel.cpp
    src/element/tile.cpp
    src/element/tooltip.cpp
@@ -116,6 +118,8 @@ set(ELEMENTS_HEADERS
    include/elements/element/style/text_entry.hpp
    include/elements/element/style/thumbwheel.hpp
    include/elements/element/text.hpp
+   include/elements/element/text_document.hpp
+   include/elements/element/text_editor.hpp
    include/elements/element/thumbwheel.hpp
    include/elements/element/tile.hpp
    include/elements/element/tracker.hpp

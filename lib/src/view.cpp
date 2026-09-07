@@ -228,11 +228,30 @@
       with_context_do(
          [btn, this](auto const& ctx, auto& _main_element)
          {
+            auto was_focus = _is_focus;
+            auto* old_focus = _is_focus? _main_element.focus() : nullptr;
             if (_main_element.click(ctx, btn))
                _is_focus = _main_element.focus();
             else if (btn.down)
                elements::relinquish_focus(_content, ctx);
-            refresh(_main_element);
+
+            // Elements repaint themselves from their own event handlers
+            // (library convention, e.g. basic_button::click refreshes
+            // internally). Repaint here only when the click changed the
+            // focus state, and only the elements that changed focus
+            // (the previous full-view repaint was the visible click
+            // flicker on focus transitions).
+            if (_is_focus != was_focus)
+            {
+               auto* f = _main_element.focus();
+               if (old_focus && old_focus != f)
+                  refresh(*old_focus);
+               if (f)
+                  refresh(*f);
+               // No else: when focus is relinquished (f == nullptr) the old
+               // focus element was already refreshed above. A full-view
+               // repaint here made every click on empty space flash.
+            }
          },
          *this, _current_bounds
       );
@@ -357,7 +376,13 @@
          return;
 
       _main_element.begin_focus(element::focus_request::restore_previous);
-      refresh();
+      // Repaint only the focused element's area. A full-view repaint on
+      // window activation visibly flickered on every click coming from
+      // another window.
+      if (auto* f = _main_element.focus())
+         refresh(*f);
+      else
+         refresh();
    }
 
    void view::end_focus()
@@ -366,7 +391,10 @@
          return;
 
       _main_element.end_focus();
-      refresh();
+      if (auto* f = _main_element.focus())
+         refresh(*f);
+      else
+         refresh();
    }
 
    void view::relinquish_focus()

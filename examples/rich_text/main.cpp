@@ -413,8 +413,15 @@ int main(int argc, char* argv[])
    _win.on_close = [&_app]() { _app.stop(); };
 
    view view_(_win);
+   // No scroller: the content fits without scrolling, and a scroller's
+   // scrollbar hover would refresh (and visibly redraw) the text. The
+   // stretches let the window resize freely in both directions; without
+   // them the window max size is clamped to the content's max extent.
    view_.content(
-      scroller(make_content())
+      htile(
+         vtile(make_content(), vstretch(1.0f, empty())),
+         hstretch(1.0f, empty())
+      )
    );
 
    _app.run();

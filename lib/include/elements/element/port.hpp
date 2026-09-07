@@ -282,6 +282,7 @@ namespace cycfi::elements
       point             _offset;
       tracking_status   _tracking;
       int               _traits;
+      bool              _scrollbar_hover = false;
    };
 
    //--------------------------------------------------------------------------

@@ -92,13 +92,31 @@ namespace cycfi::elements
                             , int align = canvas::left
                            );
 
+      // Edit-model queries. Offsets are byte offsets into the concatenated
+      // span text (i.e. the layout's own byte space, one byte per span text
+      // byte). Positions are relative to the layout origin (top-left).
+      // x_at/byte_at interpolate within a segment; exact per-character
+      // measurement is intentionally left out (good enough for caret
+      // placement and hit testing).
+      std::size_t          byte_at(point p) const;
+      float                x_at(std::size_t byte) const;
+      std::size_t          line_at(std::size_t byte) const;
+      point                caret_pos(std::size_t byte) const;
+
       point                size() const       { return _size; }
       std::vector<line> const& lines() const  { return _lines; }
       std::vector<text_span> const& spans() const { return _spans; }
 
    private:
 
+      std::size_t          span_base(std::size_t span) const;
+      std::size_t          total_size() const;
+
       std::vector<text_span>  _spans;
+      std::vector<font>       _fonts;  // one resolved font per span, cached
+                                       // at layout time (fontconfig lookup
+                                       // happens once, not per draw)
+      std::vector<float>      _space_w; // per-span space width (query use)
       std::vector<line>       _lines;
       point                   _size = {};
    };

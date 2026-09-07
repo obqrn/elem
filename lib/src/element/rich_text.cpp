@@ -33,18 +33,28 @@ namespace cycfi::elements
       canvas cnv{*scratch.context()};
 
       // Per-span font metrics, needed for line height and the baseline.
+      // The resolved font object is cached: fontconfig lookups happen once
+      // per layout, not once per segment per draw.
       struct span_metrics
       {
+         font   font_;
          float  ascent;
          float  descent;
       };
       std::vector<span_metrics> metrics;
       metrics.reserve(_spans.size());
+      _fonts.clear();
+      _fonts.reserve(_spans.size());
+      _space_w.clear();
+      _space_w.reserve(_spans.size());
       for (auto const& span : _spans)
       {
-         cnv.font(span.font_, span.font_._size);
+         font f = span.font_;
+         _fonts.push_back(f);
+         cnv.font(f, span.font_._size);
          auto fm = cnv.measure_font();
-         metrics.push_back({fm.ascent, fm.descent});
+         _space_w.push_back(cnv.measure_text(" ").size.x);
+         metrics.push_back({f, fm.ascent, fm.descent});
       }
 
       line current;
@@ -66,14 +76,17 @@ namespace cycfi::elements
       };
 
       // Measure a byte range of a span using that span's own font. The
-      // string_view overload sets the font internally (it still constructs
-      // a temporary for the backend call, but keeps the call sites clean).
+      // resolved font comes from the layout-time cache: no fontconfig
+      // lookup happens per measurement.
       auto measure_span_text = [&](std::size_t si, std::size_t first,
          std::size_t last) -> float
       {
-         return measure_text(cnv,
-            std::string_view(_spans[si].text.data() + first, last - first),
-            _spans[si].font_).x;
+         // The canvas is private to this layout call: setting the font
+         // directly (no state save/restore) is safe and cheaper.
+         cnv.font(_fonts[si], _spans[si].font_._size);
+         return cnv.measure_text(std::string(
+            _spans[si].text.data() + first,
+            _spans[si].text.data() + last).c_str()).size.x;
       };
 
       // Append a segment for span `si` covering bytes [first, last) at the
@@ -313,7 +326,7 @@ namespace cycfi::elements
          for (auto const& seg : l.segments)
          {
             auto const& span = _spans[seg.span];
-            cnv.font(span.font_, span.font_._size);
+            cnv.font(_fonts[seg.span]);
             cnv.fill_style(span.color_);
             cnv.fill_text(
                std::string_view(
@@ -322,6 +335,152 @@ namespace cycfi::elements
          }
          y += l.ascent + l.descent;
       }
+   }
+
+   std::size_t rich_text_layout::span_base(std::size_t si) const
+   {
+      std::size_t base = 0;
+      for (std::size_t s = 0; s != si && s != _spans.size(); ++s)
+         base += _spans[s].text.size();
+      return base;
+   }
+
+   std::size_t rich_text_layout::total_size() const
+   {
+      std::size_t n = 0;
+      for (auto const& s : _spans)
+         n += s.text.size();
+      return n;
+   }
+
+   std::size_t rich_text_layout::byte_at(point p) const
+   {
+      float y = 0;
+      for (auto const& l : _lines)
+      {
+         float h = l.ascent + l.descent;
+         if (p.y >= y && p.y < y + h)
+         {
+            for (std::size_t k = 0; k != l.segments.size(); ++k)
+            {
+               auto const& seg = l.segments[k];
+               float seg_w = (k + 1 < l.segments.size())?
+                  l.segments[k + 1].x - seg.x : l.width - seg.x;
+               if (p.x >= seg.x && p.x < seg.x + seg_w)
+               {
+                  auto base = span_base(seg.span) + seg.first;
+                  auto len = seg.last - seg.first;
+                  if (len == 0)
+                     return base;
+                  return base + std::size_t((p.x - seg.x) / seg_w * len);
+               }
+            }
+            // Beyond the line end: trailing dropped spaces get a virtual
+            // advance, so a click/caret can land after them.
+            if (p.x >= l.width && !l.segments.empty())
+            {
+               auto const& seg = l.segments.back();
+               auto base = span_base(seg.span) + seg.last;
+               auto sw = (seg.span < _space_w.size())? _space_w[seg.span] : 0;
+               auto n = (sw > 0)? std::size_t((p.x - l.width) / sw + 0.5f) : 0;
+               auto limit = span_base(seg.span) + _spans[seg.span].text.size();
+               return std::min(base + n, limit);
+            }
+            // Before the line start: the start of the first segment.
+            if (!l.segments.empty())
+            {
+               auto const& seg = l.segments.front();
+               return span_base(seg.span) + seg.first;
+            }
+            return 0;
+         }
+         y += h;
+      }
+      // Below all lines: the end of the text.
+      return total_size();
+   }
+
+   float rich_text_layout::x_at(std::size_t byte) const
+   {
+      for (auto const& l : _lines)
+      {
+         for (std::size_t k = 0; k != l.segments.size(); ++k)
+         {
+            auto const& seg = l.segments[k];
+            auto base = span_base(seg.span) + seg.first;
+            auto end = base + (seg.last - seg.first);
+            if (byte < base || byte > end)
+               continue;
+            // byte == end interpolates to the segment end, which equals
+            // the next segment's start: no ambiguity.
+            float seg_w = (k + 1 < l.segments.size())?
+               l.segments[k + 1].x - seg.x : l.width - seg.x;
+            auto len = seg.last - seg.first;
+            if (len == 0)
+               return seg.x;
+            return seg.x + float(byte - base) / float(len) * seg_w;
+         }
+      }
+      // Not inside any segment: a trailing space run dropped at a wrap
+      // boundary (editors keep such spaces in the document). Give them a
+      // virtual advance past the end of their line.
+      auto li = line_at(byte);
+      if (li < _lines.size() && !_lines[li].segments.empty())
+      {
+         auto const& seg = _lines[li].segments.back();
+         auto seg_end = span_base(seg.span) + seg.last;
+         if (byte > seg_end)
+         {
+            auto sw = (seg.span < _space_w.size())? _space_w[seg.span] : 0;
+            return _lines[li].width + float(byte - seg_end) * sw;
+         }
+      }
+      return _lines.empty()? 0 : _lines.back().width;
+   }
+
+   std::size_t rich_text_layout::line_at(std::size_t byte) const
+   {
+      for (std::size_t li = 0; li != _lines.size(); ++li)
+      {
+         for (auto const& seg : _lines[li].segments)
+         {
+            auto base = span_base(seg.span) + seg.first;
+            auto end = base + (seg.last - seg.first);
+            if (byte >= base && byte < end)
+               return li;
+         }
+      }
+      // At or past the end: the last line.
+      return _lines.empty()? 0 : _lines.size() - 1;
+   }
+
+   point rich_text_layout::caret_pos(std::size_t byte) const
+   {
+      // Line y: sum the heights of the lines before the one containing the
+      // byte. Uses the same containment test as x_at.
+      float y = 0;
+      float last_top = 0;
+      for (auto const& l : _lines)
+      {
+         last_top = y;
+         bool contains = false;
+         for (auto const& seg : l.segments)
+         {
+            auto base = span_base(seg.span) + seg.first;
+            auto end = base + (seg.last - seg.first);
+            if (byte >= base && byte <= end)
+            {
+               contains = true;
+               break;
+            }
+         }
+         if (contains)
+            return {x_at(byte), y};
+         y += l.ascent + l.descent;
+      }
+      // Past all segments (e.g. a byte after a dropped trailing space):
+      // stay on the last line rather than dropping below the block.
+      return {x_at(byte), last_top};
    }
 
    ////////////////////////////////////////////////////////////////////////////

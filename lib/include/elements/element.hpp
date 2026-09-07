@@ -35,6 +35,8 @@
 #include <elements/element/slider.hpp>
 #include <elements/element/status_bar.hpp>
 #include <elements/element/text.hpp>
+#include <elements/element/text_document.hpp>
+#include <elements/element/text_editor.hpp>
 #include <elements/element/thumbwheel.hpp>
 #include <elements/element/tile.hpp>
 #include <elements/element/tooltip.hpp>
