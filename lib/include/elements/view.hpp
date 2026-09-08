@@ -22,6 +22,8 @@
 #include <unordered_map>
 #include <chrono>
 #include <map>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace cycfi::elements
@@ -142,6 +144,8 @@ namespace cycfi::elements
       scaled_content          _main_element;
 
       void                    set_limits();
+      bool                    on_ui_thread() const;
+      void                    queue_refresh(bool all, rect area);
 
       rect                    _current_bounds;
       view_limits             _current_limits = {{0, 0}, { full_extent, full_extent}};
@@ -154,6 +158,13 @@ namespace cycfi::elements
 
       io_context              _io;
       asio::executor_work_guard<io_context::executor_type>        _work;
+      std::thread::id         _ui_thread = std::this_thread::get_id();
+
+      std::mutex              _refresh_mutex;
+      bool                    _refresh_task_pending = false;
+      bool                    _refresh_all_pending = false;
+      bool                    _refresh_area_pending = false;
+      rect                    _refresh_area;
 
       using time_point = std::chrono::steady_clock::time_point;
       using tracking_map = std::map<element*, time_point>;

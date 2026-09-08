@@ -10,6 +10,8 @@ project(elements LANGUAGES C CXX)
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+include(CTest)
+
 # Set the minimum required C++ standard to C++20
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,4 +29,8 @@ add_subdirectory(lib)
 if (ELEMENTS_BUILD_EXAMPLES)
    set(ELEMENTS_ROOT ${PROJECT_SOURCE_DIR})
    add_subdirectory(examples)
+endif()
+
+if (BUILD_TESTING AND WIN32 AND TARGET RichEditor)
+   add_subdirectory(tests)
 endif()

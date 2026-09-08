@@ -19,11 +19,10 @@ namespace cycfi::elements
     * \class text_editor_element
     *
     * \brief
-    *    A block-structured plain-text editor over a text_document. Each
-    *    block is laid out with a rich_text_layout (single span per block,
-    *    styled by the block type: headings use the heading font). Editing
-    *    is paragraph-incremental: a keystroke re-lays out only the touched
-    *    block(s).
+    *    A block-structured rich-text editor over a text_document. Each
+    *    block is laid out with a rich_text_layout and preserves its inline
+    *    style runs. Editing is paragraph-incremental: a keystroke re-lays out
+    *    only the touched block(s).
     *
     *    The editor supports a caret, a selection (mouse and keyboard),
     *    undo/redo, and the clipboard. IME input arrives via the text event
@@ -70,9 +69,27 @@ namespace cycfi::elements
       // re-layout incrementally.
       void              refresh_layouts();
 
+      // Apply one inline style to the current selection. It is a no-op when
+      // there is no selection. The operation is undoable with the editor's
+      // normal Ctrl+Z/Ctrl+Y path.
+      void              apply_style(context const& ctx, text_style style);
+
    private:
 
       using position = text_document::position;
+
+      struct caret_state
+      {
+         position caret;
+         position anchor;
+         bool     has_selection = false;
+      };
+
+      struct edit_state
+      {
+         caret_state before;
+         caret_state after;
+      };
 
       void              ensure_layouts() const;
       void              relayout_blocks(std::size_t first, std::size_t last) const;
@@ -83,6 +100,9 @@ namespace cycfi::elements
       position          move_right(position p) const;
       position          move_vertical(context const& ctx, position p, int dir) const;
       void              clamp_caret();
+      caret_state       capture_caret() const;
+      void              restore_caret(caret_state state);
+      void              remember_edit(caret_state before);
 
       void              insert_text(context const& ctx, string_view s);
       void              erase_selection(context const& ctx);
@@ -129,13 +149,23 @@ namespace cycfi::elements
 
       mutable std::vector<rich_text_layout> _layouts;
       mutable std::vector<float>            _block_y;
+      mutable float                          _content_width = 0;
       mutable bool                          _layouts_valid = false;
+      mutable font_descr                    _layout_text_font;
+      mutable font_descr                    _layout_heading_font;
+      mutable bool                          _layout_theme_valid = false;
 
       // Per-block prerendered pixmaps: a repaint blits them instead of
       // re-shaping and re-rasterizing the text (keeps repaints fast and
       // visually stable).
       mutable std::vector<std::unique_ptr<pixmap>> _block_cache;
       mutable std::vector<bool>                    _cache_valid;
+      mutable point                                _cache_scale;
+      mutable color                                _cache_text_color;
+      mutable bool                                 _cache_theme_valid = false;
+
+      std::vector<edit_state>                      _edit_history;
+      std::vector<edit_state>                      _redo_history;
    };
 
    text_editor_element text_editor(

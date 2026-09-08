@@ -155,26 +155,80 @@
       refresh();
    }
 
+   bool view::on_ui_thread() const
+   {
+      return std::this_thread::get_id() == _ui_thread;
+   }
+
+   void view::queue_refresh(bool all, rect area)
+   {
+      bool post = false;
+      {
+         std::lock_guard lock{_refresh_mutex};
+         if (all)
+            _refresh_all_pending = true;
+         else if (!_refresh_area_pending)
+         {
+            _refresh_area = area;
+            _refresh_area_pending = true;
+         }
+         else
+         {
+            _refresh_area = {
+               std::min(_refresh_area.left, area.left),
+               std::min(_refresh_area.top, area.top),
+               std::max(_refresh_area.right, area.right),
+               std::max(_refresh_area.bottom, area.bottom)};
+         }
+
+         if (!_refresh_task_pending)
+         {
+            _refresh_task_pending = true;
+            post = true;
+         }
+      }
+
+      if (post)
+      {
+         asio::post(_io,
+            [this]()
+            {
+               bool all;
+               bool has_area;
+               rect area;
+               {
+                  std::lock_guard lock{_refresh_mutex};
+                  all = _refresh_all_pending;
+                  has_area = _refresh_area_pending;
+                  area = _refresh_area;
+                  _refresh_all_pending = false;
+                  _refresh_area_pending = false;
+                  _refresh_task_pending = false;
+               }
+
+               if (all)
+                  base_view::refresh();
+               else if (has_area)
+                  base_view::refresh(area);
+            }
+         );
+      }
+   }
+
    void view::refresh()
    {
-      // Allow refresh to be called from another thread
-      asio::post(_io,
-         [this]()
-         {
-            base_view::refresh();
-         }
-      );
+      if (on_ui_thread())
+         base_view::refresh();
+      else
+         queue_refresh(true, {});
    }
 
    void view::refresh(rect area)
    {
-      // Allow refresh to be called from another thread
-      asio::post(_io,
-         [this, area]()
-         {
-            base_view::refresh(area);
-         }
-      );
+      if (on_ui_thread())
+         base_view::refresh(area);
+      else
+         queue_refresh(false, area);
    }
 
    void view::refresh(context const& ctx, rect area)
@@ -189,18 +243,21 @@
       if (_current_bounds.is_empty())
          return;
 
-      asio::post(_io,
-         [this, &element, outward]()
-         {
-            with_context_do(
-               [&element, outward](auto const& ctx, auto& _main_element)
-               {
-                  _main_element.refresh(ctx, element, outward);
-               },
-               *this, _current_bounds
-            );
-         }
-      );
+      auto refresh_element = [this, &element, outward]()
+      {
+         with_context_do(
+            [&element, outward](auto const& ctx, auto& _main_element)
+            {
+               _main_element.refresh(ctx, element, outward);
+            },
+            *this, _current_bounds
+         );
+      };
+
+      if (on_ui_thread())
+         refresh_element();
+      else
+         asio::post(_io, std::move(refresh_element));
    }
 
    void view::refresh(context const& ctx, int outward)

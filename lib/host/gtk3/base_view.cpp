@@ -9,10 +9,12 @@
 #include <elements/base_view.hpp>
 #include <elements/window.hpp>
 #include <elements/support/canvas.hpp>
+#include <elements/support/theme.hpp>
 #include <elements/support/resource_paths.hpp>
 #include <elements/support/font.hpp>
 #include <elements/support/text_utils.hpp>
 #include <gtk/gtk.h>
+#include <cmath>
 #include <map>
 #include <string>
 
@@ -29,6 +31,9 @@ namespace cycfi::elements
       // Mouse button click tracking
       std::uint32_t click_time = 0;
       std::uint32_t click_count = 0;
+      bool button_pressed = false;
+      bool drag_started = false;
+      point press_position;
 
       // Scroll acceleration tracking
       std::uint32_t scroll_time = 0;
@@ -40,7 +45,7 @@ namespace cycfi::elements
 
       int modifiers = 0; // the latest modifiers
 
-      GtkIMContext* im_context;
+      GtkIMContext* im_context = nullptr;
 
       GdkCursorType active_cursor_type = GDK_ARROW;
       point                      _size;               // The current view size
@@ -56,7 +61,7 @@ namespace cycfi::elements
    };
 
    host_view::host_view()
-    : im_context(gtk_im_context_simple_new())
+    : im_context(gtk_im_multicontext_new())
    {
    }
 
@@ -65,6 +70,12 @@ namespace cycfi::elements
       if (surface)
          cairo_surface_destroy(surface);
       surface = nullptr;
+      if (im_context)
+      {
+         gtk_im_context_set_client_window(im_context, nullptr);
+         g_object_unref(im_context);
+         im_context = nullptr;
+      }
    }
 
    namespace
@@ -101,6 +112,16 @@ namespace cycfi::elements
          cairo_set_source_surface(cr, host_view_h->surface, 0, 0);
          cairo_paint(cr);
 
+         // The backing surface is reused between exposes. Restore the
+         // exposed pixels before drawing transparent cached content so an
+         // old caret or selection cannot survive a local repaint.
+         auto const& bg = get_theme().window_background_color;
+         cairo_save(cr);
+         cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+         cairo_set_source_rgba(cr, bg.red, bg.green, bg.blue, bg.alpha);
+         cairo_paint(cr);
+         cairo_restore(cr);
+
          // Note that cr (cairo_t) is already clipped to only draw the exposed
          // areas of the widget. double left, top, right, bottom;
          view.draw(cr);
@@ -119,7 +140,7 @@ namespace cycfi::elements
          if (event->state & GDK_MOD1_MASK)
             btn.modifiers |= mod_alt;
          if (event->state & GDK_SUPER_MASK)
-            btn.modifiers |= mod_action;
+            btn.modifiers |= mod_super;
 
          btn.num_clicks = view->click_count;
          btn.pos = {float(event->x), float(event->y)};
@@ -142,6 +163,9 @@ namespace cycfi::elements
          {
             case GDK_BUTTON_PRESS:
                btn.down = true;
+               view->button_pressed = true;
+               view->drag_started = false;
+               view->press_position = {float(event->x), float(event->y)};
                if ((event->time - view->click_time) < guint32(dbl_click_time))
                   ++view->click_count;
                else
@@ -151,6 +175,8 @@ namespace cycfi::elements
 
             case GDK_BUTTON_RELEASE:
                btn.down = false;
+               view->button_pressed = false;
+               view->drag_started = false;
                break;
 
             default:
@@ -164,16 +190,18 @@ namespace cycfi::elements
          return true;
       }
 
-      gboolean on_button(GtkWidget* /* widget */, GdkEventButton* event, gpointer user_data)
+      gboolean on_button(GtkWidget* widget, GdkEventButton* event, gpointer user_data)
       {
          auto& view = get(user_data);
+         if (event->type == GDK_BUTTON_PRESS)
+            gtk_widget_grab_focus(widget);
          mouse_button btn;
          if (get_button(event, btn, platform_access::get_host_view(view)))
             view.click(btn);
          return true;
       }
 
-      gboolean on_motion(GtkWidget* /* widget */, GdkEventMotion* event, gpointer user_data)
+      gboolean on_motion(GtkWidget* widget, GdkEventMotion* event, gpointer user_data)
       {
          auto& base_view = get(user_data);
          host_view* view = platform_access::get_host_view(base_view);
@@ -202,8 +230,16 @@ namespace cycfi::elements
                btn.down = false;
             }
 
-            if (btn.down)
-               base_view.drag(btn);
+            if (btn.down && view->button_pressed)
+            {
+               if (!view->drag_started && gtk_drag_check_threshold(
+                  widget,
+                  int(view->press_position.x), int(view->press_position.y),
+                  int(event->x), int(event->y)))
+                  view->drag_started = true;
+               if (view->drag_started)
+                  base_view.drag(btn);
+            }
             else
                base_view.cursor(view->cursor_position, cursor_tracking::hovering);
          }
@@ -292,8 +328,12 @@ namespace cycfi::elements
    {
       auto& base_view = get(user_data);
       auto* host_view_h = platform_access::get_host_view(base_view);
-      auto cp = codepoint(str);
-      base_view.text({cp, host_view_h->modifiers});
+      char const* utf8 = str;
+      while (utf8 && *utf8)
+      {
+         auto cp = codepoint(utf8);
+         base_view.text({cp, host_view_h->modifiers});
+      }
    }
 
    int get_mods(int state)
@@ -337,11 +377,12 @@ namespace cycfi::elements
    {
       auto& base_view = get(user_data);
       auto* host_view_h = platform_access::get_host_view(base_view);
-      gtk_im_context_filter_keypress(host_view_h->im_context, event);
 
       int modifiers = get_mods(event->state);
       auto const action = event->type == GDK_KEY_PRESS? key_action::press : key_action::release;
       host_view_h->modifiers = modifiers;
+      auto filtered = gtk_im_context_filter_keypress(
+         host_view_h->im_context, event);
 
       // We don't want the shift key handled when obtaining the keyval,
       // so we do this again here, instead of relying on event->keyval
@@ -356,19 +397,46 @@ namespace cycfi::elements
 
       auto const key = translate_key(keyval);
       if (key == key_code::unknown)
-         return false;
+         return filtered;
+
+      if (filtered)
+      {
+         // A filtered release still has to clear a key that was recorded
+         // before the input method took ownership of the sequence.
+         if (action == key_action::release)
+            host_view_h->keys.erase(key);
+         return true;
+      }
 
       handle_key(base_view, host_view_h->keys, {key, action, modifiers});
       return true;
    }
 
+   void on_realize(GtkWidget* widget, gpointer user_data)
+   {
+      auto& base_view = get(user_data);
+      auto* host_view_h = platform_access::get_host_view(base_view);
+      gtk_im_context_set_client_window(
+         host_view_h->im_context, gtk_widget_get_window(widget));
+   }
+
    void on_focus(GtkWidget* /* widget */, GdkEventFocus* event, gpointer user_data)
    {
       auto& base_view = get(user_data);
+      auto* host_view_h = platform_access::get_host_view(base_view);
       if (event->in)
+      {
+         gtk_im_context_focus_in(host_view_h->im_context);
          base_view.begin_focus();
+      }
       else
+      {
+         gtk_im_context_focus_out(host_view_h->im_context);
+         gtk_im_context_reset(host_view_h->im_context);
+         host_view_h->keys.clear();
+         host_view_h->modifiers = 0;
          base_view.end_focus();
+      }
    }
 
    int poll_function(gpointer user_data)
@@ -447,12 +515,16 @@ namespace cycfi::elements
    GtkWidget* make_view(base_view& view, GtkWidget* parent)
    {
       auto* content_view = gtk_drawing_area_new();
+      gtk_widget_set_can_focus(content_view, TRUE);
+      gtk_widget_set_focus_on_click(content_view, TRUE);
 
       gtk_container_add(GTK_CONTAINER(parent), content_view);
 
       // Subscribe to content_view events
       g_signal_connect(content_view, "configure-event",
          G_CALLBACK(on_configure), &view);
+      g_signal_connect(content_view, "realize",
+         G_CALLBACK(on_realize), &view);
       g_signal_connect(content_view, "draw",
          G_CALLBACK(on_draw), &view);
       g_signal_connect(content_view, "button-press-event",
@@ -636,13 +708,17 @@ namespace cycfi::elements
 
    void base_view::refresh(rect area)
    {
-      // Note: GTK uses int coordinates. Make sure area is not empty
-      // when converting from float to int.
+      // GTK uses int coordinates. Round outward so antialiased caret and
+      // selection edges cannot remain in the unqueued last pixel.
+      auto left = int(std::floor(area.left));
+      auto top = int(std::floor(area.top));
+      auto right = int(std::ceil(area.right));
+      auto bottom = int(std::ceil(area.bottom));
       gtk_widget_queue_draw_area(_view->widget,
-         std::floor(area.left),
-         std::floor(area.top),
-         std::max<float>(area.width(), 1),
-         std::max<float>(area.height(), 1)
+         left,
+         top,
+         std::max(right - left, 1),
+         std::max(bottom - top, 1)
       );
    }
 
@@ -650,7 +726,12 @@ namespace cycfi::elements
    {
       GtkClipboard* clip = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
       gchar* text = gtk_clipboard_wait_for_text(clip);
-      return std::string(text);
+      if (!text)
+         return {};
+
+      std::string result{text};
+      g_free(text);
+      return result;
    }
 
    void clipboard(std::string const& text)
@@ -736,4 +817,3 @@ namespace cycfi::elements
    }
 
 }
-

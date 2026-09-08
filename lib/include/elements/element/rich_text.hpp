@@ -11,27 +11,14 @@
 #include <elements/support/font.hpp>
 #include <elements/base_view.hpp>
 #include <elements/element/element.hpp>
+#include <elements/element/text_style.hpp>
 #include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace cycfi::elements
 {
-   /**
-    * \struct text_span
-    *
-    * \brief
-    *    A run of text with a single style. A rich text is a sequence of
-    *    spans, each carrying its own text, font (family, size, weight and
-    *    slant, all encoded in the font_descr) and color.
-    */
-   struct text_span
-   {
-      std::string  text;
-      font_descr   font_;
-      color        color_ = colors::black;
-   };
-
    /**
     * \class rich_text_layout
     *
@@ -76,7 +63,8 @@ namespace cycfi::elements
       struct line
       {
          std::vector<segment>  segments;
-         float                 width = 0;
+         float                 width = 0;       // rendered glyph advance
+         float                 caret_width = 0; // includes dropped spaces
          float                 ascent = 0;
          float                 descent = 0;
       };
@@ -95,13 +83,18 @@ namespace cycfi::elements
       // Edit-model queries. Offsets are byte offsets into the concatenated
       // span text (i.e. the layout's own byte space, one byte per span text
       // byte). Positions are relative to the layout origin (top-left).
-      // x_at/byte_at interpolate within a segment; exact per-character
-      // measurement is intentionally left out (good enough for caret
-      // placement and hit testing).
+      // x_at/byte_at use measured UTF-8 codepoint boundaries, so caret
+      // placement and hit testing do not treat a multibyte character as
+      // several equal-width bytes.
       std::size_t          byte_at(point p) const;
       float                x_at(std::size_t byte) const;
       std::size_t          line_at(std::size_t byte) const;
       point                caret_pos(std::size_t byte) const;
+      // Return the half-open byte interval associated with a visual line.
+      // It includes the hard-newline byte and any whitespace omitted at a
+      // wrap boundary; an out-of-range line returns {0, 0}.
+      std::pair<std::size_t, std::size_t>
+                           line_range(std::size_t line) const;
 
       point                size() const       { return _size; }
       std::vector<line> const& lines() const  { return _lines; }
@@ -109,15 +102,27 @@ namespace cycfi::elements
 
    private:
 
+      struct caret_point
+      {
+         std::size_t  byte;
+         float        x;
+      };
+
       std::size_t          span_base(std::size_t span) const;
       std::size_t          total_size() const;
+      std::size_t          snap_byte(std::size_t byte) const;
 
       std::vector<text_span>  _spans;
       std::vector<font>       _fonts;  // one resolved font per span, cached
                                        // at layout time (fontconfig lookup
                                        // happens once, not per draw)
-      std::vector<float>      _space_w; // per-span space width (query use)
+      std::vector<std::size_t> _span_bases; // concatenated byte offsets
       std::vector<line>       _lines;
+      // Half-open byte interval associated with each visual line. The end is
+      // the next line's start, so it includes a hard-newline byte and spaces
+      // omitted at a wrap boundary. The final line ends at total_size().
+      std::vector<std::pair<std::size_t, std::size_t>> _line_ranges;
+      std::vector<std::vector<caret_point>> _line_carets;
       point                   _size = {};
    };
 

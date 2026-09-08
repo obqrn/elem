@@ -6,11 +6,13 @@
 #if !defined(ELEMENTS_TEXT_DOCUMENT_SEPTEMBER_6_2026)
 #define ELEMENTS_TEXT_DOCUMENT_SEPTEMBER_6_2026
 
+#include <elements/element/text_style.hpp>
 #include <infra/string_view.hpp>
 #include <algorithm>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,31 +40,51 @@ namespace cycfi::elements
     * \struct text_block
     *
     * \brief
-    *    A single paragraph of text. A hard newline is a block separator:
-    *    a non-code block never contains one. A code_block is the
-    *    exception: its text may contain newlines (Enter inside a code
-    *    block inserts a literal newline instead of splitting the block).
+    *    A block of editable rich text. The spans are stored in document
+    *    order and adjacent spans with the same style are normalized together.
+    *    A hard newline is a block separator for non-code blocks; code blocks
+    *    may contain literal newlines.
     */
    struct text_block
    {
-      block_type  type = block_type::paragraph;
-      std::string text;
+      block_type             type = block_type::paragraph;
+      std::vector<text_span> spans;
+
+                           text_block() = default;
+                           text_block(block_type type_)
+                            : type(type_)
+                           {}
+                           text_block(block_type type_, std::string text_);
+                           text_block(block_type type_,
+                              std::vector<text_span> spans_)
+                            : type(type_)
+                            , spans(std::move(spans_))
+                           {}
+                           text_block(block_type type_,
+                              std::initializer_list<text_span> spans_)
+                            : type(type_)
+                            , spans(spans_)
+                           {}
+
+      std::size_t           size() const;
+      std::string           plain_text() const;
    };
 
    /**
     * \class text_document
     *
     * \brief
-    *    A flat, block-structured text document with editing primitives and
-    *    undo/redo. The document owns its blocks; the editor elements are
-    *    views over it.
+    *    A flat, block-structured rich text document with editing primitives
+    *    and undo/redo. The document owns its blocks; editor elements are
+    *    views over it. Positions remain byte offsets into the concatenated
+    *    text of a block, so style-run boundaries do not affect navigation.
     *
     *    Editing primitives are the only mutation entry points (the blocks
     *    are exposed read-only), so every mutation is undoable. Undo uses
-    *    block-level snapshots: an edit snapshots only the blocks it touches
-    *    (one block for character edits, two for split/join), so undo cost
-    *    is independent of the document size — large documents stay
-    *    responsive.
+    *    block-level snapshots: an edit snapshots only the blocks it touches,
+    *    so undo cost is independent of the document size. A character edit
+    *    changes only the affected block's run vector; untouched blocks and
+    *    runs keep their allocations.
     */
    class text_document
    {
@@ -99,13 +121,30 @@ namespace cycfi::elements
       // Editing primitives. Each returns the range of affected blocks
       // [first, last) so views can re-layout incrementally. A `\n` inside
       // the inserted text splits blocks, except inside a code_block where
-      // it is kept as a literal newline. Erasing across a block boundary
-      // joins the blocks; if the last block is a code_block the joined
-      // block becomes a code_block (it may now hold newlines).
+      // it is kept as a literal newline. New text inherits the style at the
+      // insertion point unless an explicit style is supplied.
       std::pair<size_type, size_type>
                            insert(position pos, string_view text);
       std::pair<size_type, size_type>
+                           insert(position pos, string_view text,
+                              text_style style);
+      std::pair<size_type, size_type>
                            erase(position first, position last);
+      // Replace a range as one undoable operation. Newline normalization and
+      // block handling follow insert().
+      std::pair<size_type, size_type>
+                           replace(position first, position last, string_view text);
+      std::pair<size_type, size_type>
+                           replace(position first, position last,
+                              string_view text, text_style style);
+      // Return the stored style at a caret position. An empty font family or
+      // zero-alpha color means the editor/theme default is inherited.
+      text_style           style_at(position pos) const;
+      // Apply one style to the selected text range. The implicit newline
+      // between blocks is not styled. A collapsed range is a no-op.
+      std::pair<size_type, size_type>
+                           set_style(position first, position last,
+                              text_style style);
       std::pair<size_type, size_type>
                            set_type(size_type block, block_type type);
 
@@ -129,6 +168,13 @@ namespace cycfi::elements
       // Record the state of [first, first + count) before an edit and
       // install the entry on the undo stack (clearing redo).
       void                 record(size_type first, size_type count);
+      std::pair<size_type, size_type>
+                           insert_impl(position pos, string_view text,
+                              bool record_undo,
+                              text_style const* style);
+      std::pair<size_type, size_type>
+                           erase_impl(position first, position last,
+                              bool record_undo);
 
       std::vector<text_block>  _blocks;
       std::vector<undo_entry>  _undo;

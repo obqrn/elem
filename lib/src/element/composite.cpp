@@ -238,11 +238,25 @@ namespace cycfi::elements
 
    bool composite_base::new_focus(context const& ctx, int index, focus_request req)
    {
+      rect dirty;
+      auto add_dirty = [&](rect r)
+      {
+         if (r.is_empty())
+            return;
+         if (dirty.is_empty())
+            dirty = r;
+         else
+            dirty = {
+               std::min(dirty.left, r.left), std::min(dirty.top, r.top),
+               std::max(dirty.right, r.right), std::max(dirty.bottom, r.bottom)};
+      };
+
       // end the previous focus
       if (_focus != -1 && _focus < int(size()))
       {
+         auto old_bounds = bounds_of(ctx, _focus);
          if (at(_focus).end_focus())
-            ctx.view.refresh(ctx);
+            add_dirty(old_bounds);
          else
             return false; // return false if the current focus deoes not want to yield
       }
@@ -252,9 +266,12 @@ namespace cycfi::elements
       if (_focus != -1)
       {
          at(_focus).begin_focus(req);
-         scrollable::find(ctx).scroll_into_view(bounds_of(ctx, _focus));
-         ctx.view.refresh(ctx);
+         auto new_bounds = bounds_of(ctx, _focus);
+         if (!scrollable::find(ctx).scroll_into_view(new_bounds))
+            add_dirty(new_bounds);
       }
+      if (!dirty.is_empty())
+         ctx.view.refresh(ctx, dirty);
       return true;
    }
 

@@ -47,6 +47,91 @@ namespace cycfi::elements
          return is_heading(t)? heading_gap : block_gap;
       }
 
+      bool same_font_descr(font_descr const& a, font_descr const& b)
+      {
+         return a._families == b._families
+            && a._size == b._size
+            && a._weight == b._weight
+            && a._slant == b._slant
+            && a._stretch == b._stretch;
+      }
+
+      bool is_default_font_descr(font_descr const& f)
+      {
+         return f._families.empty()
+            && f._size == 12
+            && f._weight == font_constants::weight_normal
+            && f._slant == font_constants::slant_normal
+            && f._stretch == font_constants::stretch_normal;
+      }
+
+      font_descr effective_font(font_descr const& run_font,
+         font_descr block_font_)
+      {
+         if (!run_font._families.empty() || is_default_font_descr(run_font))
+            return run_font._families.empty()? block_font_ : run_font;
+
+         // An empty family is an inherited family with inline overrides.
+         // Keep the block's family and apply the run's explicit attributes.
+         return block_font_.size(run_font._size)
+            .weight(static_cast<font_constants::weight_enum>(run_font._weight))
+            .style(static_cast<font_constants::slant_enum>(run_font._slant))
+            .stretch(static_cast<font_constants::stretch_enum>(run_font._stretch));
+      }
+
+      std::vector<text_span> layout_spans(text_block const& block,
+         font_descr block_font_, color default_color)
+      {
+         std::vector<text_span> spans;
+         spans.reserve(std::max<std::size_t>(block.spans.size(), 1));
+         for (auto const& span : block.spans)
+         {
+            auto font = effective_font(span.font_, block_font_);
+            auto color_ = span.color_.alpha == 0?
+               default_color : span.color_;
+            spans.push_back({span.text, font, color_});
+         }
+         if (spans.empty())
+            spans.push_back({{}, block_font_, default_color});
+         return spans;
+      }
+
+      std::string text_range(text_block const& block, std::size_t first,
+         std::size_t last)
+      {
+         std::string result;
+         result.reserve(last - first);
+         std::size_t base = 0;
+         for (auto const& span : block.spans)
+         {
+            auto span_last = base + span.text.size();
+            auto begin = std::max(first, base);
+            auto end = std::min(last, span_last);
+            if (begin < end)
+               result.append(span.text, begin - base, end - begin);
+            base = span_last;
+         }
+         return result;
+      }
+
+      bool style_differs(text_block const& block, std::size_t first,
+         std::size_t last, text_style const& style)
+      {
+         if (first == last)
+            return false;
+         std::size_t base = 0;
+         for (auto const& span : block.spans)
+         {
+            auto span_last = base + span.text.size();
+            auto overlap_first = std::max(first, base);
+            auto overlap_last = std::min(last, span_last);
+            if (overlap_first < overlap_last && span.style() != style)
+               return true;
+            base = span_last;
+         }
+         return false;
+      }
+
       // Union of several rects; empty rects are skipped.
       rect union_of(rect a, rect b)
       {
@@ -97,13 +182,6 @@ namespace cycfi::elements
          return 4;
       }
 
-      // Length of the last line of a multi-line insertion: 0 when the text
-      // ends with a newline.
-      std::size_t tail_len(string_view s)
-      {
-         auto nl = s.find_last_of('\n');
-         return (nl == string_view::npos)? s.size() : s.size() - nl - 1;
-      }
    }
 
    text_editor_element::text_editor_element(
@@ -120,7 +198,14 @@ namespace cycfi::elements
    void text_editor_element::ensure_layouts() const
    {
       if (_layouts_valid)
-         return;
+      {
+         auto const& thm = get_theme();
+         if (_layout_theme_valid &&
+             same_font_descr(thm.text_box_font, _layout_text_font) &&
+             same_font_descr(thm.heading_font, _layout_heading_font))
+            return;
+         _layouts_valid = false;
+      }
 
       auto width = _width;
       auto const& blocks = _doc->blocks();
@@ -131,8 +216,7 @@ namespace cycfi::elements
       for (auto const& b : blocks)
       {
          auto font = block_font(b.type);
-         rich_text_layout rl({
-            text_span{b.text, font, thm.label_font_color}});
+         rich_text_layout rl(layout_spans(b, font, thm.label_font_color));
          rl.layout(width);
          _layouts.push_back(std::move(rl));
       }
@@ -141,6 +225,12 @@ namespace cycfi::elements
       _cache_valid.assign(_layouts.size(), false);
       _block_cache.clear();
       _block_cache.resize(_layouts.size());
+      _layout_text_font = thm.text_box_font;
+      _layout_heading_font = thm.heading_font;
+      _layout_theme_valid = true;
+      _cache_scale = {};
+      _cache_text_color = {};
+      _cache_theme_valid = false;
       _layouts_valid = true;
    }
 
@@ -152,6 +242,7 @@ namespace cycfi::elements
       if (_layouts.size() != _doc->size())
       {
          _layouts_valid = false;
+         ensure_layouts();
          return;
       }
       CYCFI_ASSERT(first < _layouts.size(), "Block index out of range");
@@ -163,8 +254,8 @@ namespace cycfi::elements
       for (auto i = first; i != last; ++i)
       {
          auto font = block_font(blocks[i].type);
-         rich_text_layout rl({
-            text_span{blocks[i].text, font, thm.label_font_color}});
+         rich_text_layout rl(layout_spans(
+            blocks[i], font, thm.label_font_color));
          rl.layout(width);
          _layouts[i] = std::move(rl);
          _cache_valid[i] = false;
@@ -176,10 +267,14 @@ namespace cycfi::elements
    {
       _block_y.clear();
       _block_y.reserve(_layouts.size() + 1);
+      _content_width = 0;
       float y = 0;
       auto const& blocks = _doc->blocks();
       for (std::size_t i = 0; i != _layouts.size(); ++i)
       {
+         _content_width = std::max(_content_width, _layouts[i].size().x);
+         for (auto const& line : _layouts[i].lines())
+            _content_width = std::max(_content_width, line.caret_width);
          _block_y.push_back(y + gap_before(blocks[i].type));
          y = _block_y.back() + _layouts[i].size().y;
       }
@@ -189,12 +284,11 @@ namespace cycfi::elements
    view_limits text_editor_element::limits(basic_context const& /* ctx */) const
    {
       ensure_layouts();
-      // The min width is the laid-out content width (wrapped at _width).
-      // A zero min would make the port hand the subject a zero-width
-      // bounds, rejecting every click on x > 0.
-      float min_x = 0;
-      for (auto const& rl : _layouts)
-         min_x = std::max(min_x, rl.size().x);
+      // A fixed wrap width is also the editor's usable minimum width. Using
+      // only the current longest line makes short documents collapse inside
+      // an htile, so clicks in the editor's blank area never reach it.
+      float min_x = (_width == full_extent)? 0 : _width;
+      min_x = std::max(min_x, _content_width);
       return {{min_x, _block_y.back()}, {full_extent, _block_y.back()}};
    }
 
@@ -211,7 +305,50 @@ namespace cycfi::elements
    void text_editor_element::refresh_layouts()
    {
       _layouts_valid = false;
+      _layout_theme_valid = false;
+      _cache_theme_valid = false;
+      // The document may have changed outside this editor; its document
+      // undo stack can no longer be paired reliably with local caret states.
+      _edit_history.clear();
+      _redo_history.clear();
       clamp_caret();
+   }
+
+   void text_editor_element::apply_style(context const& ctx, text_style style)
+   {
+      if (!_has_selection)
+         return;
+
+      ensure_layouts();
+      clamp_caret();
+      auto first = sel_min();
+      auto last = sel_max();
+      bool changed = false;
+      auto const& blocks = _doc->blocks();
+      for (auto i = first.block; i <= last.block; ++i)
+      {
+         auto begin = i == first.block? first.offset : 0;
+         auto end = i == last.block? last.offset : blocks[i].size();
+         if (style_differs(blocks[i], begin, end, style))
+         {
+            changed = true;
+            break;
+         }
+      }
+      if (!changed)
+         return;
+
+      auto before = capture_caret();
+      auto old_caret = caret_rect();
+      auto old_sel = selection_bounds();
+      auto anchor_before = _block_y[last.block + 1];
+      auto [affected_first, affected_last] =
+         _doc->set_style(first, last, style);
+      remember_edit(before);
+      if (_layouts_valid)
+         relayout_blocks(affected_first, affected_last);
+      repaint_edit(ctx, old_caret, old_sel,
+         affected_first, affected_last, anchor_before);
    }
 
    ////////////////////////////////////////////////////////////////////////////
@@ -222,6 +359,21 @@ namespace cycfi::elements
       ensure_layouts();
       auto& cnv = ctx.canvas;
 
+      auto text_color = get_theme().label_font_color;
+      if (_cache_theme_valid && _cache_text_color != text_color)
+      {
+         // The color is stored in each layout span. Rebuilding only the
+         // pixmap would keep drawing the old color into the new cache.
+         _layouts_valid = false;
+         ensure_layouts();
+      }
+      if (!_cache_theme_valid || _cache_text_color != text_color)
+      {
+         std::fill(_cache_valid.begin(), _cache_valid.end(), false);
+         _cache_text_color = text_color;
+         _cache_theme_valid = true;
+      }
+
       // Local (content) coordinates; the bounds top-left is the origin.
       float view_h = ctx.bounds.height();
       float origin_x = ctx.bounds.left;
@@ -230,16 +382,20 @@ namespace cycfi::elements
       // Blocks, culled to the visible range. Each block is rendered into
       // a cached pixmap on first draw (and after relayout); subsequent
       // repaints just blit the pixmap.
-      auto device_scale = [&]() {
-         auto o = cnv.user_to_device(point{0, 0});
-         auto u = cnv.user_to_device(point{1, 0});
-         return u.x - o.x;
-      }();
+      auto device_scale = cnv.device_scale();
+      if (std::abs(device_scale.x - _cache_scale.x) > 0.001f ||
+          std::abs(device_scale.y - _cache_scale.y) > 0.001f)
+      {
+         std::fill(_cache_valid.begin(), _cache_valid.end(), false);
+         _cache_scale = device_scale;
+      }
       for (std::size_t i = 0; i != _doc->size(); ++i)
       {
          float y0 = _block_y[i];
          float y1 = y0 + _layouts[i].size().y;
-         if (y1 < 0 || y0 > view_h)
+         if (y0 > view_h)
+            break;
+         if (y1 < 0)
             continue;
          if (i >= _cache_valid.size() || !_cache_valid[i])
          {
@@ -254,10 +410,13 @@ namespace cycfi::elements
                // rasterized text at 1/scale the density and the blit
                // magnified it, blurring the glyphs.
                _block_cache[i] = std::make_unique<pixmap>(
-                  point{sz.x * device_scale, sz.y * device_scale}, 1.0f);
+                  point{
+                     std::ceil(sz.x * device_scale.x),
+                     std::ceil(sz.y * device_scale.y)
+                  }, 1.0f);
                pixmap_context pc(*_block_cache[i]);
                canvas c2{*pc.context()};
-               c2.scale({device_scale, device_scale});
+               c2.scale(device_scale);
                rl.draw(c2, {0, 0});
                if (i >= _cache_valid.size())
                   _cache_valid.resize(i + 1, false);
@@ -268,9 +427,10 @@ namespace cycfi::elements
          {
             auto sz = _layouts[i].size();
             cnv.draw(*_block_cache[i],
-               rect{0, 0, sz.x * device_scale, sz.y * device_scale},
+               rect{0, 0,
+                    sz.x * device_scale.x, sz.y * device_scale.y},
                rect{origin_x, origin_y + y0,
-                    origin_x + sz.x, origin_y + y0 + sz.y});
+                    origin_x + sz.x, origin_y + y0 + sz.y}, false);
          }
          else
             _layouts[i].draw(cnv, {origin_x, origin_y + y0});
@@ -289,36 +449,39 @@ namespace cycfi::elements
          {
             float y0 = _block_y[i];
             float y1 = y0 + _layouts[i].size().y;
-            if (y1 < 0 || y0 > view_h)
+            if (y0 > view_h)
+               break;
+            if (y1 < 0)
                continue;
 
             // Byte range of this block within the selection.
             std::size_t b0 = (i == first.block)? first.offset : 0;
             std::size_t b1 = (i == last.block)? last.offset :
-               _doc->blocks()[i].text.size();
+               _doc->blocks()[i].size();
             if (b0 == b1)
                continue;
 
             auto& rl = _layouts[i];
             float y = y0;
-            for (auto const& l : rl.lines())
+            for (std::size_t li = 0; li != rl.lines().size(); ++li)
             {
+               auto const& l = rl.lines()[li];
                float h = l.ascent + l.descent;
-               if (l.segments.empty())
-               {
-                  y += h;
-                  continue;
-               }
-               auto line0 = l.segments.front().first;
-               auto line1 = l.segments.back().last;
-               auto sel0 = std::max(b0, line0);
-               auto sel1 = std::min(b1, line1);
+               auto range = rl.line_range(li);
+               auto sel0 = std::max(b0, range.first);
+               auto sel1 = std::min(b1, range.second);
                if (sel0 < sel1)
                {
-                  auto x0 = origin_x + rl.x_at(sel0);
-                  auto x1 = origin_x + rl.x_at(sel1);
+                  auto x0 = (sel0 == range.first)? 0.0f : rl.x_at(sel0);
+                  auto x1 = (sel1 == range.second)? l.caret_width :
+                     rl.x_at(sel1);
+                  if (l.segments.empty())
+                     x1 = std::max(x1, x0 + 2.0f);
+                  if (x1 < x0)
+                     std::swap(x0, x1);
                   cnv.fill_style(get_theme().indicator_color.opacity(0.3));
-                  cnv.fill_rect({x0, origin_y + y, x1, origin_y + y + h});
+                  cnv.fill_rect({origin_x + x0, origin_y + y,
+                     origin_x + x1, origin_y + y + h});
                }
                y += h;
             }
@@ -343,6 +506,10 @@ namespace cycfi::elements
    text_editor_element::position
    text_editor_element::position_at(point p) const
    {
+      ensure_layouts();
+      if (_doc->empty())
+         return {};
+
       // Find the block: binary search on _block_y.
       auto it = std::upper_bound(_block_y.begin(), _block_y.end(), p.y);
       std::size_t bi = (it == _block_y.begin())? 0 : std::size_t(it - _block_y.begin()) - 1;
@@ -359,14 +526,30 @@ namespace cycfi::elements
       if (p.offset > 0)
       {
          // Step back one UTF-8 character.
-         auto& t = blocks[p.block].text;
+         auto const& t = blocks[p.block].spans;
          auto off = p.offset - 1;
-         while (off > 0 && (uint8_t(t[off]) & 0xC0) == 0x80)
+         while (off > 0)
+         {
+            std::size_t base = 0;
+            bool continuation = false;
+            for (auto const& span : t)
+            {
+               if (off < base + span.text.size())
+               {
+                  continuation =
+                     (uint8_t(span.text[off - base]) & 0xC0) == 0x80;
+                  break;
+               }
+               base += span.text.size();
+            }
+            if (!continuation)
+               break;
             --off;
+         }
          return {p.block, off};
       }
       if (p.block > 0)
-         return {p.block - 1, blocks[p.block - 1].text.size()};
+         return {p.block - 1, blocks[p.block - 1].size()};
       return p;
    }
 
@@ -374,13 +557,30 @@ namespace cycfi::elements
    text_editor_element::move_right(position p) const
    {
       auto const& blocks = _doc->blocks();
-      auto& t = blocks[p.block].text;
-      if (p.offset < t.size())
+      auto const& t = blocks[p.block].spans;
+      auto length = blocks[p.block].size();
+      if (p.offset < length)
       {
          // Step forward one UTF-8 character.
          auto off = p.offset + 1;
-         while (off < t.size() && (uint8_t(t[off]) & 0xC0) == 0x80)
+         while (off < length)
+         {
+            std::size_t base = 0;
+            bool continuation = false;
+            for (auto const& span : t)
+            {
+               if (off < base + span.text.size())
+               {
+                  continuation =
+                     (uint8_t(span.text[off - base]) & 0xC0) == 0x80;
+                  break;
+               }
+               base += span.text.size();
+            }
+            if (!continuation)
+               break;
             ++off;
+         }
          return {p.block, off};
       }
       if (p.block + 1 < blocks.size())
@@ -442,6 +642,29 @@ namespace cycfi::elements
          _has_selection = false;
    }
 
+   text_editor_element::caret_state
+   text_editor_element::capture_caret() const
+   {
+      return {_caret, _anchor, _has_selection};
+   }
+
+   void text_editor_element::restore_caret(caret_state state)
+   {
+      _caret = state.caret;
+      _anchor = state.anchor;
+      _has_selection = state.has_selection;
+      _desired_x = -1;
+      clamp_caret();
+   }
+
+   void text_editor_element::remember_edit(caret_state before)
+   {
+      _edit_history.push_back({before, capture_caret()});
+      _redo_history.clear();
+      if (_edit_history.size() > 1000)
+         _edit_history.erase(_edit_history.begin());
+   }
+
    text_editor_element::position text_editor_element::sel_min() const
    {
       return (_anchor < _caret)? _anchor : _caret;
@@ -487,6 +710,19 @@ namespace cycfi::elements
       auto b = _layouts[sel_max().block].caret_pos(sel_max().offset);
       float ya = _block_y[sel_min().block] + a.y;
       float yb = _block_y[sel_max().block] + b.y;
+      auto first = sel_min();
+      auto last = sel_max();
+      auto first_line = _layouts[first.block].line_at(first.offset);
+      auto last_line = _layouts[last.block].line_at(last.offset);
+      if (first.block != last.block || first_line != last_line)
+      {
+         // Selection drawing can cover every line between the endpoints. A
+         // narrow endpoint rectangle would leave stale highlights when the
+         // caret moves across a wrapped line or another block.
+         return {0, std::min(ya, yb), _content_width,
+            std::max(ya + caret_line_height(first),
+               yb + caret_line_height(last))};
+      }
       return {
          std::min(a.x, b.x), std::min(ya, yb),
          std::max(a.x, b.x),
@@ -508,7 +744,7 @@ namespace cycfi::elements
       auto u = union_of(old_caret, old_sel, caret_rect(), selection_bounds());
       if (u.is_empty())
          return;
-      u.move_to(u.left + ctx.bounds.left, u.top + ctx.bounds.top);
+      u = u.move_to(u.left + ctx.bounds.left, u.top + ctx.bounds.top);
       ctx.view.refresh(ctx, u);
    }
 
@@ -524,14 +760,17 @@ namespace cycfi::elements
       float bottom = (last < _block_y.size())? _block_y[last] : _block_y.back();
       if (bottom != anchor_before)
       {
-         float w = 0;
-         for (auto const& rl : _layouts)
-            w = std::max(w, rl.size().x);
-         u = union_of(u, rect{0, std::min(anchor_before, bottom), w, _block_y.back()});
+         u = union_of(u, rect{0, std::min(anchor_before, bottom),
+            _content_width, _block_y.back()});
       }
+      // A shorter edit can leave old glyphs to the right of the new line,
+      // even when the block height is unchanged. Repaint the complete
+      // affected vertical band, including the caret's one-pixel left edge.
+      if (!u.is_empty())
+         u = union_of(u, rect{-2, u.top, ctx.bounds.width() + 2, u.bottom});
       if (u.is_empty())
          return;
-      u.move_to(u.left + ctx.bounds.left, u.top + ctx.bounds.top);
+      u = u.move_to(u.left + ctx.bounds.left, u.top + ctx.bounds.top);
       ctx.view.refresh(ctx, u);
    }
 
@@ -543,6 +782,10 @@ namespace cycfi::elements
       if (s.empty())
          return;
 
+      ensure_layouts();
+      clamp_caret();
+
+      auto before = capture_caret();
       auto old_caret = caret_rect();
       auto old_sel = selection_bounds();
       auto mn = sel_min();
@@ -552,26 +795,27 @@ namespace cycfi::elements
       // touched block to the pre-edit bottom of the last touched one.
       float anchor_before = _block_y[mx.block + 1];
 
-      if (_has_selection)
-         _doc->erase(mn, mx);
+      // Keep the untouched suffix length. The document normalizes CRLF while
+      // inserting, so deriving the caret from the input byte count is wrong.
+      auto tail_size = _doc->blocks()[mx.block].size() - mx.offset;
 
       // The insert lands where the selection started (or the old caret).
       position at = _doc->clamp(mn);
-      _caret = at;
-      _anchor = at;
-      _has_selection = false;
       _desired_x = -1;
 
-      auto [first, last] = _doc->insert(at, s);
+      auto [first, last] = _has_selection?
+         _doc->replace(mn, mx, s) : _doc->insert(at, s);
 
       // The caret lands at the end of the inserted text: after the last
       // byte of a single-block insert, or at the end of the last inserted
       // line (which is the start of the next line when the text ends with
       // a newline, e.g. Enter).
-      if (last == first + 1)
-         _caret = _doc->clamp({first, at.offset + s.size()});
-      else
-         _caret = _doc->clamp({last - 1, tail_len(s)});
+      auto caret_block = last - 1;
+      auto caret_offset = _doc->blocks()[caret_block].size() - tail_size;
+      _caret = _doc->clamp({caret_block, caret_offset});
+      _anchor = _caret;
+      _has_selection = false;
+      remember_edit(before);
 
       if (_layouts_valid)
          relayout_blocks(first, last);
@@ -583,6 +827,10 @@ namespace cycfi::elements
       if (!_has_selection)
          return;
 
+      ensure_layouts();
+      clamp_caret();
+
+      auto before = capture_caret();
       auto old_caret = caret_rect();
       auto old_sel = selection_bounds();
       auto mn = sel_min();
@@ -594,6 +842,7 @@ namespace cycfi::elements
       _anchor = _caret;
       _has_selection = false;
       _desired_x = -1;
+      remember_edit(before);
 
       if (_layouts_valid)
          relayout_blocks(first, last);
@@ -608,23 +857,23 @@ namespace cycfi::elements
       auto last = sel_max();
       auto const& blocks = _doc->blocks();
       if (first.block == last.block)
-         return blocks[first.block].text.substr(
-            first.offset, last.offset - first.offset);
-      std::string s = blocks[first.block].text.substr(first.offset);
+         return text_range(blocks[first.block], first.offset, last.offset);
+      std::string s = text_range(blocks[first.block], first.offset,
+         blocks[first.block].size());
       for (auto i = first.block + 1; i != last.block; ++i)
       {
          s += '\n';
-         s += blocks[i].text;
+         s += blocks[i].plain_text();
       }
       s += '\n';
-      s += blocks[last.block].text.substr(0, last.offset);
+      s += text_range(blocks[last.block], 0, last.offset);
       return s;
    }
 
    void text_editor_element::select_all()
    {
       _anchor = {0, 0};
-      _caret = {_doc->size() - 1, _doc->blocks().back().text.size()};
+      _caret = {_doc->size() - 1, _doc->blocks().back().size()};
       _has_selection = (_caret != _anchor);
    }
 
@@ -633,27 +882,32 @@ namespace cycfi::elements
    ////////////////////////////////////////////////////////////////////////////
    bool text_editor_element::click(context const& ctx, mouse_button btn)
    {
-      if (btn.state != mouse_button::left || !ctx.bounds.includes(btn.pos))
+      if (btn.state != mouse_button::left)
          return false;
 
-      if (btn.down)
-      {
-         auto old_caret = caret_rect();
-         auto old_sel = selection_bounds();
-         _caret = position_at(
-            {btn.pos.x - ctx.bounds.left, btn.pos.y - ctx.bounds.top});
-         _anchor = _caret;
-         _has_selection = false;
-         _desired_x = -1;
-         // Repaint the caret areas plus the old selection extent: a click
-         // clears the selection, and without repainting it the highlight
-         // lingers (the reported 'multiple carets').
-         repaint_caret(ctx, old_caret, old_sel);
-         return true;
-      }
-      // Button up: the caret was already positioned (and repainted) on
-      // down; nothing changed, so nothing to repaint. The unconditional
-      // full-editor refresh here used to cause the visible click flicker.
+      // Button-up can arrive outside the editor after a drag because the
+      // host captures the mouse. Always clear the pointer state first.
+      if (!btn.down)
+         return ctx.bounds.includes(btn.pos);
+
+      if (!ctx.bounds.includes(btn.pos))
+         return false;
+
+      ensure_layouts();
+      clamp_caret();
+
+      auto old_caret = caret_rect();
+      auto old_sel = selection_bounds();
+      auto local = point{
+         btn.pos.x - ctx.bounds.left, btn.pos.y - ctx.bounds.top};
+      _caret = position_at(local);
+      _anchor = _caret;
+      _has_selection = false;
+      _desired_x = -1;
+      // Repaint the caret areas plus the old selection extent: a click
+      // clears the selection, and without repainting it the highlight
+      // lingers (the reported 'multiple carets').
+      repaint_caret(ctx, old_caret, old_sel);
       return true;
    }
 
@@ -661,10 +915,16 @@ namespace cycfi::elements
    {
       if (btn.state != mouse_button::left)
          return;
+
+      ensure_layouts();
+      clamp_caret();
+
+      auto local = point{
+         btn.pos.x - ctx.bounds.left, btn.pos.y - ctx.bounds.top};
+
       auto old_caret = caret_rect();
       auto old_sel = selection_bounds();
-      _caret = position_at(
-         {btn.pos.x - ctx.bounds.left, btn.pos.y - ctx.bounds.top});
+      _caret = position_at(local);
       _has_selection = (_caret != _anchor);
       _desired_x = -1;
       // Repaint only the caret and selection extents (old + new). A
@@ -686,6 +946,9 @@ namespace cycfi::elements
       if (k.action == key_action::release || k.action == key_action::unknown)
          return false;
 
+      ensure_layouts();
+      clamp_caret();
+
       auto ctrl = (k.modifiers & (mod_control | mod_action)) != 0;
       auto shift = (k.modifiers & mod_shift) != 0;
 
@@ -699,7 +962,15 @@ namespace cycfi::elements
                {
                   _doc->undo();
                   _layouts_valid = false;
-                  clamp_caret();
+                  if (!_edit_history.empty())
+                  {
+                     auto edit = std::move(_edit_history.back());
+                     _edit_history.pop_back();
+                     restore_caret(edit.before);
+                     _redo_history.push_back(std::move(edit));
+                  }
+                  else
+                     clamp_caret();
                   // Undo can change the block count anywhere in the
                   // document; relayout everything and repaint the element.
                   ensure_layouts();
@@ -712,7 +983,15 @@ namespace cycfi::elements
                {
                   _doc->redo();
                   _layouts_valid = false;
-                  clamp_caret();
+                  if (!_redo_history.empty())
+                  {
+                     auto edit = std::move(_redo_history.back());
+                     _redo_history.pop_back();
+                     restore_caret(edit.after);
+                     _edit_history.push_back(std::move(edit));
+                  }
+                  else
+                     clamp_caret();
                   ensure_layouts();
                   ctx.view.refresh(ctx);
                }
@@ -840,7 +1119,7 @@ namespace cycfi::elements
          {
             auto old_caret = caret_rect();
             auto old_sel = selection_bounds();
-            _caret = {_caret.block, _doc->blocks()[_caret.block].text.size()};
+            _caret = {_caret.block, _doc->blocks()[_caret.block].size()};
             if (!shift)
             {
                _anchor = _caret;
@@ -863,6 +1142,7 @@ namespace cycfi::elements
             auto p = move_left(_caret);
             if (p != _caret)
             {
+               auto before = capture_caret();
                auto old_caret = caret_rect();
                auto old_sel = selection_bounds();
                float anchor_before = _block_y[_caret.block + 1];
@@ -870,6 +1150,7 @@ namespace cycfi::elements
                _caret = _doc->clamp(p);
                _anchor = _caret;
                _desired_x = -1;
+               remember_edit(before);
                if (_layouts_valid)
                   relayout_blocks(first, last);
                repaint_edit(ctx, old_caret, old_sel, first, last, anchor_before);
@@ -887,6 +1168,7 @@ namespace cycfi::elements
             auto p = move_right(_caret);
             if (p != _caret)
             {
+               auto before = capture_caret();
                auto old_caret = caret_rect();
                auto old_sel = selection_bounds();
                float anchor_before = _block_y[_caret.block + 1];
@@ -894,6 +1176,7 @@ namespace cycfi::elements
                _caret = _doc->clamp(_caret);
                _anchor = _caret;
                _desired_x = -1;
+               remember_edit(before);
                if (_layouts_valid)
                   relayout_blocks(first, last);
                repaint_edit(ctx, old_caret, old_sel, first, last, anchor_before);
@@ -934,7 +1217,10 @@ namespace cycfi::elements
       // composition itself is rendered by the system's default IME window,
       // so typed CJK text appears after the commit. Inline composition
       // (preedit under the caret) is a stage 2b host-side extension.
-      if (info.codepoint < 32)
+      if (info.codepoint < 32 ||
+          (info.codepoint >= 0x7F && info.codepoint <= 0x9F) ||
+          info.codepoint > 0x10FFFF ||
+          (info.codepoint >= 0xD800 && info.codepoint <= 0xDFFF))
          return false;
 
       char buf[4];

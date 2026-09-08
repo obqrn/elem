@@ -43,6 +43,7 @@ namespace cycfi { namespace elements
       void              translate(point p);
       void              rotate(float rad);
       void              scale(point p);
+      point             device_scale() const;
       void              skew(float sx, float sy);
       point             device_to_user(point p);
       point             user_to_device(point p);
@@ -187,7 +188,8 @@ namespace cycfi { namespace elements
       ///////////////////////////////////////////////////////////////////////////////////
       // Pixmaps
 
-      void              draw(pixmap const& pm, elements::rect src, elements::rect dest);
+      void              draw(pixmap const& pm, elements::rect src,
+                           elements::rect dest, bool filtered = true);
       void              draw(pixmap const& pm, elements::rect dest);
       void              draw(pixmap const& pm, point pos);
 

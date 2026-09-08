@@ -10,8 +10,27 @@ xref:../layout.adoc[labels], which render a single style, rich text mixes
 styles on one line, wraps lines across span boundaries, and shares a common
 baseline between spans of different font sizes.
 
-Rich text is read-only. It provides the layout core for the styled text
-pipeline; interactive editing builds on top of it in later stages.
+`rich_text` is a read-only element. The same span representation is also
+used by `text_document` and `text_editor` for editable inline styles. Text
+positions remain UTF-8 byte offsets in the concatenated text of a block, so
+crossing a style boundary does not change caret navigation.
+
+== text_style
+
+`text_style` is the style used by editable runs:
+
+[source,cpp]
+----
+struct text_style
+{
+   font_descr  font_;
+   color       color_ = {};
+};
+----
+
+An empty font family or a zero-alpha color inherits the block/theme default
+when the style is rendered by `text_editor`. A `text_span` with an explicit
+font and color remains absolute when passed directly to `rich_text`.
 
 == text_span
 
@@ -31,6 +50,8 @@ struct text_span
 members, for example `.bold()`, `.italic()`, `.size(16)`.
 
 `color_`:: The text color.
+
+`text_span::style()` returns the corresponding `text_style`.
 
 == rich_text
 
@@ -67,7 +88,7 @@ The wrapping engine is greedy and word based:
   hard-broken character by character (UTF-8 aware). A single character wider
   than the line is placed anyway (the line may exceed the width).
 * A hard newline ends the line immediately; consecutive newlines produce
-  explicit empty lines. A leading newline produces no leading empty line.
+  explicit empty lines, including a leading or trailing empty line.
   CRLF counts as a single newline. Spaces after a hard newline are
   preserved (they are significant in markdown, e.g. indented code blocks).
 * Spaces pending at a wrap-induced line end are dropped; wrapped lines never
@@ -95,3 +116,35 @@ auto s = layout.size();                // resulting extent
 
 All measurement and drawing go through the canvas abstraction
 (`measure_text` / `fill_text`); no backend-specific types are exposed.
+
+== Editable rich text
+
+`text_document` stores each block as an ordered `std::vector<text_span>`.
+Adjacent runs with the same style are merged automatically. Plain string
+constructors create inherited runs, so existing block-type font defaults
+continue to work.
+
+[source,cpp]
+----
+auto base = get_theme().text_box_font;
+text_document doc({
+   text_block{block_type::paragraph, std::vector<text_span>{
+      {"normal ", base, colors::black},
+      {"bold", base.bold(), colors::blue}
+   }}
+});
+
+doc.insert({0, 11}, " text");       // inherits the bold run
+doc.set_style({0, 0}, {0, 6},
+   {base.italic(), colors::red});
+----
+
+Insertion, deletion, block splitting and joining preserve run styles.
+`set_style` splits only the boundary runs and records the affected blocks in
+the existing block-level undo history. `text_editor_element::apply_style`
+applies the same operation to its current selection and repaints only the
+affected region.
+
+The editor lays out and caches blocks independently. An edit copies or
+rebuilds only runs in the touched block; unrelated blocks keep their layout,
+pixmap and string allocations.

@@ -118,6 +118,7 @@ set(ELEMENTS_HEADERS
    include/elements/element/style/text_entry.hpp
    include/elements/element/style/thumbwheel.hpp
    include/elements/element/text.hpp
+   include/elements/element/text_style.hpp
    include/elements/element/text_document.hpp
    include/elements/element/text_editor.hpp
    include/elements/element/thumbwheel.hpp

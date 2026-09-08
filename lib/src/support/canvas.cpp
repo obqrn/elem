@@ -6,6 +6,7 @@
 #include <elements/support/canvas.hpp>
 #include <cairo.h>
 
+#include <cmath>
 #include <memory>
 
 namespace cycfi { namespace elements
@@ -89,6 +90,16 @@ namespace cycfi { namespace elements
    void canvas::scale(point p)
    {
       cairo_scale(&_context, p.x, p.y);
+   }
+
+   point canvas::device_scale() const
+   {
+      cairo_matrix_t affine;
+      cairo_get_matrix(&_context, &affine);
+      return {
+         float(std::hypot(affine.xx, affine.yx)),
+         float(std::hypot(affine.xy, affine.yy))
+      };
    }
 
    void canvas::skew(float sx, float sy)
@@ -430,7 +441,8 @@ namespace cycfi { namespace elements
       };
    }
 
-   void canvas::draw(pixmap const& pm, elements::rect src, elements::rect dest)
+   void canvas::draw(pixmap const& pm, elements::rect src, elements::rect dest,
+      bool filtered)
    {
       auto  state = new_state();
       auto  w = dest.width();
@@ -439,6 +451,9 @@ namespace cycfi { namespace elements
       auto scale_ = point{w/src.width(), h/src.height()};
       scale(scale_);
       cairo_set_source_surface(&_context, pm._surface, -src.left, -src.top);
+      if (!filtered)
+         cairo_pattern_set_filter(cairo_get_source(&_context),
+            CAIRO_FILTER_NEAREST);
       add_rect({0, 0, w/scale_.x, h/scale_.y});
       cairo_fill(&_context);
    }

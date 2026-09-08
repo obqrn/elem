@@ -29,10 +29,15 @@
 #include <elements/base_view.hpp>
 #include <elements/support/canvas.hpp>
 #include <elements/support/resource_paths.hpp>
+#include <elements/support/theme.hpp>
 #include <cairo.h>
 #include <cairo-win32.h>
 #include <Windowsx.h>
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <cmath>
 #include <map>
 #include "drag_and_drop.hpp"
 #include "utils.hpp"
@@ -75,6 +80,8 @@ namespace cycfi::elements
 
          base_view*     vptr = nullptr;
          bool           is_dragging = false;
+         bool           drag_started = false;
+         POINT          drag_start = {};
          HDC            hdc = nullptr;
          HDC            offscreen_hdc = nullptr;
          HBITMAP        offscreen_buff = nullptr;
@@ -87,6 +94,7 @@ namespace cycfi::elements
          double         _velocity = 0;
          point          _scroll_dir;
          key_map        keys = {};
+         std::uint16_t  pending_high_surrogate = 0;
       };
 
       view_info* get_view_info(HWND hwnd)
@@ -116,11 +124,9 @@ namespace cycfi::elements
       {
          if (base_view* view = info->vptr)
          {
-            RECT dirty;
-            GetUpdateRect(hwnd, &dirty, false);
-
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
+            RECT dirty = ps.rcPaint;
             SetBkMode(hdc, TRANSPARENT);
 
             RECT r;
@@ -132,6 +138,20 @@ namespace cycfi::elements
                make_offscreen_dc(hdc, info, win_width, win_height);
 
             HANDLE hold = SelectObject(info->offscreen_hdc, info->offscreen_buff);
+
+            // The off-screen bitmap is reused between paints. Clear only the
+            // invalidated pixels before drawing so transparent cached text
+            // cannot preserve an old caret or selection highlight.
+            auto const& bg = get_theme().window_background_color;
+            auto to_byte = [](float value)
+            {
+               return static_cast<BYTE>(
+                  std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+            };
+            auto brush = static_cast<HBRUSH>(GetStockObject(DC_BRUSH));
+            SetDCBrushColor(info->offscreen_hdc, RGB(
+               to_byte(bg.red), to_byte(bg.green), to_byte(bg.blue)));
+            FillRect(info->offscreen_hdc, &dirty, brush);
 
             // Create the cairo surface and context.
             cairo_surface_t* surface = cairo_win32_surface_create(info->offscreen_hdc);
@@ -206,6 +226,9 @@ namespace cycfi::elements
                   if (!info->is_dragging)
                   {
                      info->is_dragging = true;
+                     info->drag_started = false;
+                     info->drag_start = {
+                        GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
                      SetCapture(hwnd);
                   }
                   down = true;
@@ -219,6 +242,7 @@ namespace cycfi::elements
                if (info->is_dragging)
                {
                   info->is_dragging = false;
+                  info->drag_started = false;
                   ReleaseCapture();
                }
                break;
@@ -255,6 +279,14 @@ namespace cycfi::elements
          };
       }
 
+      bool drag_threshold_crossed(view_info const& info, LPARAM lparam)
+      {
+         auto dx = std::abs(GET_X_LPARAM(lparam) - info.drag_start.x);
+         auto dy = std::abs(GET_Y_LPARAM(lparam) - info.drag_start.y);
+         return dx >= GetSystemMetrics(SM_CXDRAG) ||
+            dy >= GetSystemMetrics(SM_CYDRAG);
+      }
+
       bool handle_key(base_view& _view, view_info::key_map& keys, key_info k)
       {
          bool repeated = false;
@@ -279,7 +311,27 @@ namespace cycfi::elements
       {
          auto const key = translate_key(wparam, lparam);
          auto const action = ((lparam >> 31) & 1) ? key_action::release : key_action::press;
-         auto const mods = get_mods();
+         auto mods = get_mods();
+
+         // GetAsyncKeyState can lag behind an injected or queued key message.
+         // Preserve modifier state from the per-view key map while dispatching
+         // the following key event.
+         auto key_down = [info](key_code code)
+         {
+            auto i = info->keys.find(code);
+            return i != info->keys.end() &&
+               (i->second == key_action::press ||
+                i->second == key_action::repeat);
+         };
+         if (key_down(key_code::left_shift) || key_down(key_code::right_shift))
+            mods |= mod_shift;
+         if (key_down(key_code::left_control) ||
+             key_down(key_code::right_control))
+            mods |= mod_control | mod_action;
+         if (key_down(key_code::left_alt) || key_down(key_code::right_alt))
+            mods |= mod_alt;
+         if (key_down(key_code::left_super) || key_down(key_code::right_super))
+            mods |= mod_super;
 
          if (key == key_code::unknown)
             return false;
@@ -359,7 +411,7 @@ namespace cycfi::elements
          info->vptr->scroll(dir, {pos.x / scale, pos.y / scale});
       }
 
-      bool on_text(base_view& view, UINT message, WPARAM wparam)
+      bool on_text(view_info* info, base_view& view, UINT message, WPARAM wparam)
       {
          if (message == WM_UNICHAR && wparam == UNICODE_NOCHAR)
          {
@@ -369,14 +421,55 @@ namespace cycfi::elements
             return true;
          }
 
-         bool const plain = message != WM_SYSCHAR;
-         uint32_t codepoint = wparam;
+         if (message == WM_SYSCHAR)
+         {
+            info->pending_high_surrogate = 0;
+            return false;
+         }
+
+         std::uint32_t codepoint = 0;
+         if (message == WM_UNICHAR)
+         {
+            // WM_UNICHAR carries a complete UTF-32 codepoint.
+            info->pending_high_surrogate = 0;
+            codepoint = static_cast<std::uint32_t>(wparam);
+         }
+         else
+         {
+            // WM_CHAR carries UTF-16 code units. Supplementary characters
+            // arrive as a high/low-surrogate pair and must be combined before
+            // they reach the UTF-8 document model.
+            auto unit = static_cast<std::uint16_t>(wparam);
+            if (unit >= 0xD800 && unit <= 0xDBFF)
+            {
+               info->pending_high_surrogate = unit;
+               return true;
+            }
+            if (unit >= 0xDC00 && unit <= 0xDFFF)
+            {
+               if (!info->pending_high_surrogate)
+                  return false;
+               codepoint = 0x10000u +
+                  ((std::uint32_t(info->pending_high_surrogate) - 0xD800u) << 10) +
+                  (unit - 0xDC00u);
+               info->pending_high_surrogate = 0;
+            }
+            else
+            {
+               // An unpaired high surrogate is discarded when the next
+               // character is not its low-surrogate continuation.
+               info->pending_high_surrogate = 0;
+               codepoint = unit;
+            }
+         }
+
          if (codepoint < 32 || (codepoint > 126 && codepoint < 160))
             return 0;
 
-         if (plain)
-            return view.text({codepoint, get_mods()});
-         return false;
+         if (codepoint > 0x10FFFF ||
+             (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+            return false;
+         return view.text({codepoint, get_mods()});
       }
 
       LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
@@ -433,7 +526,12 @@ namespace cycfi::elements
             case WM_MOUSEMOVE:
                if (info->is_dragging)
                {
-                  info->vptr->drag(get_button(hwnd, info, message, wparam, lparam));
+                  if (!info->drag_started &&
+                      drag_threshold_crossed(*info, lparam))
+                     info->drag_started = true;
+                  if (info->drag_started)
+                     info->vptr->drag(
+                        get_button(hwnd, info, message, wparam, lparam));
                }
                else
                {
@@ -454,6 +552,14 @@ namespace cycfi::elements
             case WM_MOUSELEAVE:
                info->mouse_in_window = false;
                on_cursor(hwnd, info->vptr, lparam, cursor_tracking::leaving);
+               break;
+
+            case WM_CAPTURECHANGED:
+               // A capture can be stolen by another window without sending
+               // a button-up to this view. Do not leave the next click in
+               // the drag path.
+               info->is_dragging = false;
+               info->drag_started = false;
                break;
 
             case WM_MOUSEHOVER:
@@ -503,14 +609,17 @@ namespace cycfi::elements
             case WM_CHAR:
             case WM_SYSCHAR:
             case WM_UNICHAR:
-               return on_text(*info->vptr, message, wparam);
+               return on_text(info, *info->vptr, message, wparam);
 
             case WM_SETFOCUS:
                info->vptr->begin_focus();
                break;
 
             case WM_KILLFOCUS:
-               info->vptr->end_focus();
+               {
+                  info->pending_high_surrogate = 0;
+                  info->vptr->end_focus();
+               }
                break;
 
             default:
@@ -649,10 +758,17 @@ namespace cycfi::elements
    {
       auto scale = get_scale_for_window(_view);
       RECT r;
-      r.left = area.left * scale;
-      r.right = area.right * scale;
-      r.top = area.top * scale;
-      r.bottom = area.bottom * scale;
+      // Invalidation must contain every pixel touched by an antialiased
+      // edge. Truncating the right/bottom edge can leave the last caret
+      // column or row outside the update region at fractional DPI scales.
+      r.left = LONG(std::floor(area.left * scale));
+      r.right = LONG(std::ceil(area.right * scale));
+      r.top = LONG(std::floor(area.top * scale));
+      r.bottom = LONG(std::ceil(area.bottom * scale));
+      if (r.right <= r.left)
+         r.right = r.left + 1;
+      if (r.bottom <= r.top)
+         r.bottom = r.top + 1;
       InvalidateRect(_view, &r, false);
    }
 
@@ -663,11 +779,17 @@ namespace cycfi::elements
 
       HANDLE object = GetClipboardData(CF_UNICODETEXT);
       if (!object)
+      {
+         CloseClipboard();
          return {};
+      }
 
       WCHAR* buffer = static_cast<WCHAR*>(GlobalLock(object));
       if (!buffer)
+      {
+         CloseClipboard();
          return {};
+      }
 
       std::wstring source{buffer, std::char_traits<WCHAR>::length(buffer)};
 
@@ -698,10 +820,14 @@ namespace cycfi::elements
       GlobalUnlock(object);
 
       if (!OpenClipboard(nullptr))
+      {
+         GlobalFree(object);
          return;
+      }
 
       EmptyClipboard();
-      SetClipboardData(CF_UNICODETEXT, object);
+      if (!SetClipboardData(CF_UNICODETEXT, object))
+         GlobalFree(object);
       CloseClipboard();
    }
 
@@ -769,4 +895,3 @@ namespace cycfi::elements
       return {1.0f, 1.0f * scroll_dir};
    }
 }
-

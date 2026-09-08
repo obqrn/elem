@@ -1,25 +1,25 @@
 # 2a 纯文本块编辑器 — 重新设计（v2）
 
-状态：已定案并实现（9781e213），探针 8/8 + selftest 64 组全绿。
+状态：2a 基线已定案并实现（9781e213）；当前编辑器已在此基线上加入 2b 行内样式运行。
 上一版实现：`rich-editor` 分支（517388e8），因交互问题整体返工。
 
 ## 1. 目标与范围
 
-在阶段 1（rich_text_layout 排版内核）之上实现**可用的纯文本块编辑器**：
+在阶段 1（rich_text_layout 排版内核）之上实现**可用的块结构编辑器**：
 
 - 扁平块模型：paragraph / heading1-6 / list_item / quote / code_block
-- 块类型仅映射字体（颜色/样式区分是 2b 的事）
+- 块类型映射默认字体，块内可包含多个行内样式运行
 - UTF-8 光标、选区、拖选
 - 剪贴板（复制/剪切/粘贴）、IME 直接输入
 - 块级快照 undo/redo
 - 键盘：方向键、Home/End、退格（块首退格=与上一块合并）、Enter 拆块
 
-**明确不做**（2b/3）：样式 span、颜色、markdown 导入导出、滚动（内容超出窗口时的滚动方案留到 2b 与样式排版一起设计）。
+**当前不做**：markdown 导入导出、富文本剪贴板和滚动（内容超出窗口时的滚动方案另行设计）。
 
 ## 2. 架构
 
 ```
-text_document          —— 数据：扁平 vector<text_block>，insert/erase 返回受影响块区间
+text_document          —— 数据：扁平 vector<text_block>，块内保存 vector<text_span>
 text_editor_element    —— 交互：焦点/caret/选区/键盘/IME/剪贴板/增量重排
 rich_text_layout       —— 排版（阶段 1，不改）
 rich_editor 示例       —— 窗口结构照抄 rich_text（见约束 C1）
